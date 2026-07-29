@@ -1,6 +1,6 @@
 {
   "name": "inmemory",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "description": "Verbatim recall across Claude Code sessions, plus a gate that stops oversized skills from flooding the prompt. Pure Node, no dependencies, no API calls.",
   "keywords": [
     "memory",
@@ -11,5 +11,10 @@
   ],
   "hooks": "./hooks/hooks.json",
   "commands": "./commands",
-  "skills": "./skills"
+  "skills": "./skills",
+  "author": {
+    "name": "Reikor-Arg",
+    "url": "https://github.com/Reikor-Arg"
+  },
+  "homepage": "https://github.com/Reikor-Arg/inmemory"
 }
