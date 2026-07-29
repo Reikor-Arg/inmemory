@@ -108,6 +108,7 @@ You never invoke anything. Five hooks do the work:
 | When | What arrives | Cost |
 |---|---|---|
 | You open a project | where it left off: recent sessions, files touched, decisions recorded | ~110 tokens |
+| **Every session start** | **routing rules: what belongs on the cheap tier** | **~255 tokens** |
 | **The context is compacted** | **your own words from this session, in order — the thread that was just summarised away** | **~700 tokens** |
 | You type a prompt | pointers into past turns that share uncommon words with it | ~200 tokens |
 | A file is opened or edited | earlier turns that discussed **that file** | ~150 tokens |
@@ -254,6 +255,30 @@ does: read what this project already decided. Generic advice cannot notice that
 a plan proposes what the team rejected six months ago, that a component ignores
 the file beside it, or that a PR quietly reverses a recorded decision. Those are
 the failures that cost real time.
+
+## Work that belongs on a cheaper model
+
+Whatever model you run, it will do work far below its pay grade without
+complaining: summarising a long log, drafting a commit message, translating,
+rewriting a comment. None of that needs the model you are paying the most for.
+
+So each session starts with a short routing rule — think on the model you are
+on, delegate repo work to a tier below if you have one, and send text with no
+judgement in it to Haiku. It is written in tiers rather than model names because
+plenty of people run Sonnet as their top model and have nothing above it; the
+Haiku line is the one that applies to everyone, and it is also the one that
+saves the most.
+
+If Ollama is listening on `127.0.0.1:11434`, one more line names the model you
+have and says to use it instead — the same work for no tokens at all. Nothing is
+injected about it when it is absent, and the check is a refused connection on
+localhost.
+
+**This is the only part of the plugin that spends tokens every session whether
+it helps or not**: 255, in the cached prefix. One avoided summary pays it back
+several times. Edit the rules in `ground_rules.md` — everything after the last
+`---` in that file is what gets sent, and nothing in the code depends on the
+wording. `INMEMORY_RULES=0` sends nothing.
 
 ## The same file, twice
 
@@ -427,6 +452,8 @@ untouched. `DECISIONS.md` files stay in your repositories, where they belong.
 | `RECALL_MIN_COVERAGE` | 0.5 | share of query terms a chunk must contain |
 | `RECALL_MAX_HITS` | 4 | pointers per injection |
 | `INMEMORY_BLOCK_REREADS` | 1 | `0` allows re-reading an unchanged file |
+| `INMEMORY_RULES` | 1 | `0` stops injecting the routing rules |
+| `OLLAMA_HOST` | 127.0.0.1:11434 | where to look for a local model |
 | `SKILL_WEIGHT_LIMIT` | 120000 | bytes above which a skill is declined |
 | `SKILL_WEIGHT_ALLOW` | — | comma-separated skills to always allow |
 

@@ -13,6 +13,7 @@ import path from "node:path";
 import os from "node:os";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
+import http from "node:http";
 import { spawnSync } from "node:child_process";
 
 // Absolute path to this file, so messages we print can be pasted and run from
@@ -676,6 +677,11 @@ function scanRecap(file) {
 async function cmdSessionStart(payload) {
   const cwd = (payload && payload.cwd) || process.cwd();
   const project = resolveProject(cwd);
+
+  // Before anything else, and on every kind of start including a compaction --
+  // a routing rule that was dropped with the rest of the context stops being
+  // followed, which is the whole reason it is cheap to resend.
+  await emitRules();
 
   // Coming back from a compaction is a different situation from opening a
   // project: the thread that was just summarised away is what is missing, not
@@ -1431,18 +1437,74 @@ function cmdStandup(args) {
   console.log(`\n(+ahead / -behind relative to ${base || "the default branch"}. Nothing here was inferred.)`);
 }
 
-function cmdRules() {
-  // Next to this file, or one level up: the plugin layout puts hooks/ under
-  // the plugin root while ground_rules.md sits at the root, and a standalone
-  // checkout keeps them side by side.
-  let body;
-  for (const f of [path.join(HERE, "ground_rules.md"), path.join(HERE, "..", "ground_rules.md")]) {
-    try { body = fs.readFileSync(f, "utf8"); break; } catch { /* try next */ }
+export function rulesText(body) {
+  if (body === undefined) {
+    // Next to this file, or one level up: the plugin layout puts hooks/ under
+    // the plugin root while ground_rules.md sits at the root, and a standalone
+    // checkout keeps them side by side.
+    for (const f of [path.join(HERE, "ground_rules.md"), path.join(HERE, "..", "ground_rules.md")]) {
+      try { body = fs.readFileSync(f, "utf8"); break; } catch { /* try next */ }
+    }
   }
-  if (!body) return;
-  const parts = body.split("---");
-  const rules = (parts.length > 1 ? parts[parts.length - 1] : body).trim();
-  if (rules) { console.log("<ground_rules>"); console.log(rules); console.log("</ground_rules>"); }
+  if (!body) return null;
+
+  // Everything after the LAST line that is exactly `---`. This used to split on
+  // the string "---" and take the last piece, which injected the file's own
+  // documentation and its commented-out optional block: 549 tokens where the
+  // file claimed 150, two thirds of it notes that should never reach a prompt.
+  const lines = body.split(/\r?\n/);
+  let start = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].trim() === "---") { start = i + 1; break; }
+  }
+  const rules = (start >= 0 ? lines.slice(start).join("\n") : body)
+    .replace(/<!--[\s\S]*?-->/g, "")   // commented out means off, not injected
+    .trim();
+  return rules || null;
+}
+
+// A local model does the cheap tier for free. Worth one line of the injection,
+// but only when it is actually there -- an absent Ollama costs a refused
+// connection on localhost and says nothing.
+async function ollamaLine() {
+  const raw = process.env.OLLAMA_HOST || "127.0.0.1:11434";
+  const url = /^https?:\/\//.test(raw) ? raw : `http://${raw}`;
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+    try {
+      const req = http.get(`${url}/api/tags`, (res) => {
+        if (res.statusCode !== 200) { res.resume(); return done(null); }
+        let data = "";
+        res.setEncoding("utf8");
+        res.on("data", (c) => { if (data.length < 4000) data += c; });
+        res.on("end", () => {
+          try {
+            const first = (JSON.parse(data).models || [])[0];
+            done(first && first.name
+              ? `- Ollama is running here with ${first.name}. Use it for the transforms above instead of Haiku: same work, no tokens.`
+              : null);
+          } catch { done(null); }
+        });
+      });
+      req.setTimeout(300, () => { req.destroy(); done(null); });
+      req.on("error", () => done(null));
+    } catch { done(null); }
+  });
+}
+
+async function emitRules() {
+  if (process.env.INMEMORY_RULES === "0") return;
+  const rules = rulesText();
+  if (!rules) return;
+  let extra = null;
+  try { extra = await ollamaLine(); } catch { /* never block a session start */ }
+  console.log(`<ground_rules>\n${rules}${extra ? `\n${extra}` : ""}\n</ground_rules>`);
+}
+
+function cmdRules() {
+  const rules = rulesText();
+  if (rules) console.log(`<ground_rules>\n${rules}\n</ground_rules>`);
 }
 
 // Turns "it does not work" into a list of specific things that are or are not
@@ -1753,6 +1815,23 @@ async function selftest() {
 
   clearReads(sess);
   try { fs.unlinkSync(probe); } catch { /* ya no esta */ }
+
+  // Las reglas se inyectan en cada sesion: lo que se cuele aca se paga siempre.
+  const doc = [
+    "# Titulo", "prosa que explica el archivo", "",
+    "<!--", "- opcion apagada", "-->", "",
+    "---", "", "- **Regla real.** Va al prompt.",
+  ].join("\n");
+  const r = rulesText(doc);
+  assert(r === "- **Regla real.** Va al prompt.", `regla mal recortada: ${JSON.stringify(r)}`);
+  assert(!r.includes("prosa"), "inyecto la documentacion del archivo");
+  assert(!r.includes("opcion apagada"), "inyecto un bloque comentado");
+  assert(rulesText("sin separador") === "sin separador", "sin marcador debe ir entero");
+  assert(rulesText("") === null, "archivo vacio no inyecta nada");
+
+  const real = rulesText();
+  assert(real && real.length < 1200,
+    `las reglas del repo pesan ${real ? real.length : 0} chars, demasiado para cada sesion`);
 
   console.log("OK: selftest passed");
 }

@@ -3,6 +3,31 @@
 Newest first. Every figure quoted here was measured on a real session, not
 estimated.
 
+## 2.10.0 — the routing rules actually reach a session
+
+`ground_rules.md` shipped in every release and was **reachable only by running a
+command nobody runs**. No hook sent it, so the cheapest saving in the whole
+plugin — not spending your top model on work a small one does identically — was
+never applied. It is now injected at every session start, including after a
+compaction, since a rule dropped with the rest of the context stops being
+followed.
+
+Two things were wrong with it besides:
+
+- It injected **549 tokens while claiming 150**. The code took everything after
+  the first `---`, which swept up the file's own documentation and the
+  commented-out optional block. Now it takes only what follows the *last* `---`
+  and strips comments: 255 tokens, all of them rules.
+- It named Opus as the thinking tier. Plenty of people run Sonnet as their top
+  model and have nothing above it, so the rules are written in tiers instead —
+  and the line that applies to everyone regardless, cheap text work goes to
+  Haiku, is the one that saves the most.
+
+If Ollama answers on `127.0.0.1:11434`, one line names the model found and says
+to use it instead of Haiku: the same work for no tokens. Absent, it injects
+nothing and costs a refused connection on localhost. `OLLAMA_HOST` to point
+elsewhere, `INMEMORY_RULES=0` to send none of it.
+
 ## 2.9.0 — two things a fresh install gets on day one
 
 **The POSIX hooks had never been run.** They were `command -v node || exit 0`:
