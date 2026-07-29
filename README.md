@@ -1,13 +1,17 @@
 # inmemory
 
-Claude Code forgets everything between sessions, and forgets the details within
-one every time the context is compacted. This plugin gives it back the exact
-words — not a summary of them.
+Claude Code forgets your project between sessions. Within a long one, it forgets
+the details every time the context is compacted.
 
-It also stops a single oversized skill from quietly costing you three quarters
-of a session.
+You have felt this. You explain a decision, work for two hours, come back
+tomorrow, and explain the same decision again. Or mid-session it starts
+proposing the approach you already rejected — because the turn where you
+rejected it is gone.
 
-**No dependencies. No API calls. No model runs. Nothing leaves your machine.**
+This gives the memory back. Not a summary of what happened: **the exact words**.
+
+**No dependencies. No API calls. No model runs in the background. Nothing leaves
+your machine.**
 
 ---
 
@@ -18,125 +22,150 @@ of a session.
 /plugin install inmemory
 ```
 
-Requires Node (any version from 14 on). Claude Code's npm install path already
-brings it; if you use the standalone binary, `node --version` should print
-something.
+Needs Node — any version from 14 on. Nothing to configure.
 
-That's it. The first session indexes the transcripts Claude Code has already
-been writing all along — nothing new is recorded, and nothing is uploaded.
+The first session indexes the transcripts Claude Code has been writing all
+along. Nothing new is recorded. Nothing is uploaded.
 
-## It works without you doing anything
+## It works on its own
 
-Five hooks, all automatic. You never have to invoke anything for the memory to
-work:
+You never invoke anything. Five hooks do the work:
 
-| When | What happens | Cost |
+| When | What arrives | Cost |
 |---|---|---|
-| Session starts | where this project left off: last sessions, files touched, latest decisions | ~110 tokens |
-| You type a prompt | pointers into past turns that share uncommon words with it | ~200 tokens, or **zero** if nothing matches |
-| A file is read or edited | earlier turns that discussed *that file* | ~150 tokens, or **zero** |
-| A skill is invoked | oversized ones are declined with a pointer to the file worth reading | zero |
-| The turn ends | the new turn is indexed | zero |
+| You open a project | where it left off: recent sessions, files touched, decisions recorded | ~110 tokens |
+| You type a prompt | pointers into past turns that share uncommon words with it | ~200 tokens |
+| A file is opened or edited | earlier turns that discussed **that file** | ~150 tokens |
+| A skill is invoked | oversized ones are declined, with a pointer to the file worth reading | 0 |
+| The turn ends | the new turn is indexed | 0 |
 
-Every one of them injects nothing when it has nothing worth saying. The
-commands below exist for when you want to dig on purpose — not as a
-requirement for the plugin to do its job.
+**Each one injects nothing when it has nothing worth saying.** A vague question
+costs zero. A file nobody has discussed costs zero. That is the difference
+between memory that helps and memory that is just a tax.
 
-## What it does
+## What it looks like
 
-**Recall.** When what you type shares uncommon words with a past turn in this
-project, you get a few one-line pointers into that history:
+You ask about something you worked on weeks ago:
 
 ```
-<recall> ...
+<recall>
   #4121 | 2026-05-14 | session 8259c017 | can we keep the current sync tool or does it need replacing?
   #4145 | 2026-05-14 | session 8259c017 | the scanner should run after the sync, not during
 </recall>
 ```
 
-Claude pulls the full verbatim text only for the ones that matter. A typical
-injection costs about 200 tokens. A vague question costs **zero** — if nothing
-clearly matches, nothing is injected.
+Two lines, not two pages. Claude pulls the full verbatim text only for the ones
+that turn out to matter — and what comes back is what was actually said, word
+for word, because nothing was ever summarised.
 
-**Skill gate.** Before a skill loads, its size is checked. Small ones pass
-untouched. A 794 KB one is declined with a pointer to the specific file worth
-reading instead. Nothing becomes unreachable; the expensive path just stops
-being the automatic one.
+## Why verbatim matters
 
-## Commands
+Most memory tools run a model over your session and store its summary. That is
+lossy in one direction only: the detail the summariser dropped — the exact
+variable name, the error string, *why* approach B was rejected — is gone for
+good. And a summariser that misreads a session stores the misreading as fact,
+where it will be replayed to you confidently, months later, as something you
+said.
+
+This stores the original text and summarises nothing. If a chunk comes back,
+those words were said. It can fail to find something; it cannot invent it.
+
+That also makes it free to write. There is no second model running in the
+background to produce observations — indexing is plain string work. Ten thousand
+turns index in about 25 seconds and cost nothing.
+
+## Commands, for digging on purpose
 
 | Command | What it gives you |
 |---|---|
-| `/recall <query>` | verbatim excerpts matching a query (`--global` for every project) |
-| `/timeline` | every session, newest first, grouped by ISO week |
+| `/recall <query>` | verbatim excerpts matching a query (`--global` across all projects) |
+| `/timeline` | every session, newest first, grouped by week |
 | `/digest [YYYY-Www]` | what was asked in a week, verbatim, plus files and commands |
 | `/topics` | terms frequent here and rare elsewhere: what this project is about |
 | `/map [name]` | the repo's layout and declarations, or which file declares `name` |
-| `/duplicates` | the same name declared in several files; filenames reused across directories |
-| `/standup` | uncommitted work, branches active recently, how far each is from the default |
-| `/decide` | record why something was decided, so the reason outlives the session |
+| `/duplicates` | the same name declared in several files |
+| `/standup` | uncommitted work, active branches, how far each is from the default |
+| `/decide <what and why>` | record a decision so the reason outlives the session |
+| `/how-it-works` | what the plugin does, what it costs, what it cannot do |
 
-`timeline` and `digest` are the trace: what you worked on, when, in your own
-words. They are computed from the index, so they cost **no tokens to produce** —
-unlike a memory plugin that runs a model in the background to write summaries.
-
-The same things run directly, from anywhere:
-
-```
-node <plugin>/hooks/recall.mjs timeline [--global] [--limit=N]
-node <plugin>/hooks/recall.mjs digest [--global] [YYYY-Www]
-node <plugin>/hooks/recall.mjs topics [--top=N]
-node <plugin>/hooks/recall.mjs map [--refresh] [name]
-node <plugin>/hooks/recall.mjs duplicates [--refresh]
-node <plugin>/hooks/recall.mjs standup [--days=N]
-node <plugin>/hooks/recall.mjs decide "<what and why>" | --list [term]
-node <plugin>/hooks/recall.mjs sessions [--global] [filter]   # one line per session
-node <plugin>/hooks/recall.mjs show <id>                      # verbatim text of a pointer
-node <plugin>/hooks/recall.mjs index --all                    # backfill every project (~25 s)
-node <plugin>/hooks/recall.mjs stats
-```
-
-## Why not just use a summarising memory plugin
-
-Summarising at write time is lossy and permanent. The detail the summariser
-dropped — the exact variable name, the error string, why approach B was
-rejected — cannot be recovered, and a summariser that misreads a session stores
-that misreading as fact.
-
-This one keeps the original text and summarises nothing. If a chunk comes back,
-those words were actually said.
-
-It also costs nothing to write. No second model runs in the background to
-produce observations; indexing is plain string work.
-
-## What it deliberately does not do
-
-No background model runs. Reports are computed from the index and handed to
-Claude as raw material; Claude writes the narrative when you ask for one, and
-only then. Nothing is generated while you are not looking, so nothing is
-generated wrong while you are not looking either.
+All computed from the index. None of them run a model, so none of them cost
+tokens to produce — only the output you actually read.
 
 ## Decisions
 
-A decision made in turn 47 of a long session is, in practice, lost: findable
-only by someone who already remembers enough to search for it. `decide` writes
-it to `DECISIONS.md` in the repo — dated, branch-tagged, append-only.
+A decision made in turn 47 of a long session is lost in practice: findable only
+by someone who already remembers enough to search for it. It is also the thing
+nobody can reconstruct later — the choice survives in the code, the *reason*
+does not.
 
-In the repo rather than in the index on purpose. A decision is something the
-team should see in a diff and be able to argue with, not a private note on one
-machine. The index picks the file up like any other, so it is searchable too.
+`/decide "chose Postgres over SQLite because two services write concurrently"`
+appends to `DECISIONS.md` in the repo: dated, branch-tagged, append-only. In the
+repo rather than in a private index, because a decision is something the team
+should see in a diff and be able to argue with.
 
-## Known limitation
+Superseding one means adding an entry that says so. Never editing the old one —
+that erases the reason someone once chose differently, which is exactly what the
+next person needs.
 
-Retrieval is lexical. If you ask about "network errors" and the session said
-"socket timeout", with no word in common, it will not find it — and it will
-tell you nothing rather than guess. Query expansion was implemented, measured,
-and removed: it dragged in unrelated results, and a wrong hit costs tokens and
-sends work down the wrong path. A false negative is honest and free.
+## Skills
+
+Four, which fire on their own when the situation matches:
+
+- **inmemory** — reach for the index instead of re-exploring; how to read its
+  output without overstating it
+- **plan** — planning a change that spans files, grounded in what the repo is
+  and what was already decided
+- **design** — building or reviewing UI, starting from the conventions already
+  in the project
+- **pr** — reviewing, preparing, or waiting on a pull request
+
+What separates these from the same advice anywhere else is the first thing each
+does: read what this project already decided. Generic advice cannot notice that
+a plan proposes what the team rejected six months ago, that a component ignores
+the file beside it, or that a PR quietly reverses a recorded decision. Those are
+the failures that cost real time.
+
+## The skill gate
+
+Invoking a skill inlines its text into the prompt and keeps it there for the
+rest of the session. Most are a few KB. Some are enormous — one measured 794 KB,
+which arrived as a single 325,000-token cache write and raised the cost of every
+remaining turn in that session.
+
+Before a skill loads, its size is checked. Small ones pass untouched. Oversized
+ones are declined with a pointer to the specific file worth reading instead.
+Nothing becomes unreachable; the expensive path just stops being automatic.
+
+## Honest limits
+
+**Retrieval is lexical.** Ask about "network errors" when the session said
+"socket timeout", with no word in common, and it will not find it. Query
+expansion was built, measured, and removed: it dragged in unrelated results, and
+a wrong hit costs tokens *and* sends work down the wrong path. A miss is honest
+and free.
+
+**It only knows what was written down.** Reasoning that stayed in a thinking
+block, and work done outside Claude Code, are not there.
+
+**`map` is regex-based and shallow.** A missing symbol is a gap in the map, not
+proof the symbol does not exist.
+
+**`digest` records what was asked and touched, not whether it worked.** Nothing
+tracks whether a fix succeeded.
+
+## Your data
+
+`~/.claude/recall/` — an index built from the transcripts already in
+`~/.claude/projects/`. Delete the folder to reset; it rebuilds on the next
+session. Nothing is sent anywhere, ever.
+
+## When something breaks
+
+Every hook fails open. A broken index, an unreadable file, a malformed payload:
+the turn proceeds exactly as if the plugin were not installed. It can lose the
+ability to help. It cannot block your work.
 
 ## Tuning
-
-All optional, via environment variables:
 
 | Variable | Default | Effect |
 |---|---|---|
@@ -145,18 +174,6 @@ All optional, via environment variables:
 | `RECALL_MAX_HITS` | 4 | pointers per injection |
 | `SKILL_WEIGHT_LIMIT` | 120000 | bytes above which a skill is declined |
 | `SKILL_WEIGHT_ALLOW` | — | comma-separated skills to always allow |
-
-## Where your data lives
-
-`~/.claude/recall/` — an index built from the transcripts already in
-`~/.claude/projects/`. Delete the folder to reset; it rebuilds on the next
-session. Nothing is sent anywhere.
-
-## Failure behaviour
-
-Every hook fails open. A broken index, an unreadable file, a malformed payload:
-the turn proceeds as if the plugin were not installed. It can lose the ability
-to help; it cannot block your work.
 
 ## License
 
