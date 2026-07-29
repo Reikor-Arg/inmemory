@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "inmemory",
-      "version": "2.0.0",
+      "version": "2.1.0",
       "description": "Gives Claude back the exact words from past sessions instead of a summary of them, and stops one oversized skill from costing you most of a session. Pure Node, no dependencies, nothing leaves your machine.",
       "source": "./",
       "category": "Productivity"

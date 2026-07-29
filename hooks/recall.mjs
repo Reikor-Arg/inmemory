@@ -476,6 +476,104 @@ function cmdInject(payload) {
   console.log("</recall>");
 }
 
+// ------------------------------------------------------- automatic context
+
+// Fired at SessionStart. Orientation, not a report: where this project left
+// off, in a couple of hundred tokens. The alternative is the model opening
+// cold and spending far more than that rediscovering the same thing with Glob
+// and Grep -- or worse, not rediscovering it and asking the user.
+function cmdSessionStart(payload) {
+  const cwd = (payload && payload.cwd) || process.cwd();
+  const project = resolveProject(cwd);
+  let sessions;
+  try { sessions = scanSessions(project); } catch { return; }
+  if (!sessions.length) return; // first time in this project: nothing to say
+
+  const recent = sessions.slice(0, 3);
+  const files = new Map();
+  for (const s of recent) {
+    for (const f of s.files) {
+      const b = path.basename(f);
+      files.set(b, (files.get(b) || 0) + 1);
+    }
+  }
+  const top = [...files.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map(([f]) => f);
+
+  const lines = ["<project_memory>"];
+  lines.push(`Previous work in this project (${sessions.length} session(s) indexed):`);
+  for (const s of recent) {
+    lines.push(`  ${(s.ts || "").slice(0, 10)} | ${s.turns} turns | ${s.ask.slice(0, 120)}`);
+  }
+  if (top.length) lines.push(`Files touched recently: ${top.join(", ")}`);
+
+  let decisions = null;
+  try {
+    const body = fs.readFileSync(path.join(cwd, "DECISIONS.md"), "utf8");
+    const entries = body.split(/^## /m).slice(1);
+    if (entries.length) {
+      decisions = entries.slice(-2).map((e) => e.trim().split("\n").filter(Boolean).slice(0, 2).join(" -- "));
+    }
+  } catch { /* no decisions file */ }
+  if (decisions) {
+    lines.push("Latest recorded decisions:");
+    for (const d of decisions) lines.push(`  ${d.slice(0, 160)}`);
+  }
+  lines.push("</project_memory>");
+  console.log(lines.join("\n"));
+}
+
+// Fired before a file is read or edited. If that file has been discussed
+// before, say so now -- this is the moment the context is worth having, and
+// the only moment it can be delivered without the model knowing to ask.
+function cmdFileContext(payload) {
+  const input = (payload && payload.tool_input) || {};
+  const target = input.file_path || input.notebook_path;
+  if (!target) return;
+  const base = path.basename(String(target));
+  if (base.length < MIN_TERM_LEN) return;
+
+  const cwd = (payload && payload.cwd) || process.cwd();
+  const session = payload.session_id || "";
+  let hits;
+  try {
+    // Not the normal search path: that one requires two terms so a vague
+    // prompt cannot retrieve anything, and a filename is exactly one. A
+    // filename is specific enough on its own -- the rarity check below is what
+    // keeps a common name like index.js from matching half the project.
+    const meta = readJson(META, { docs: 0 });
+    if (!meta.docs) return;
+    const postings = postingsFor([base]);
+    const df = (postings.get(base) || []).length;
+    if (!df || df > Math.max(20, Math.floor(meta.docs * COMMON_TERM_RATIO))) return;
+    const lens = readJson(OFFSETS, []);
+    const avgdl = (meta.totalLen || 1) / meta.docs || 1;
+    const ranked = [...bm25([base], postings, meta.docs, avgdl, lens).entries()]
+      .sort((a, b) => b[1] - a[1]).slice(0, 24);
+    const project = resolveProject(cwd);
+    const fd = openChunks();
+    hits = [];
+    try {
+      for (const [id] of ranked) {
+        const rec = readChunkAt(fd, lens[id]);
+        if (!rec || rec.project !== project || rec.session === session) continue;
+        hits.push(rec);
+        if (hits.length >= 3) break;
+      }
+    } finally { if (fd) fs.closeSync(fd); }
+  } catch { return; }
+  if (!hits.length) return; // nothing said about this file: inject nothing
+
+  const lines = hits.map((h) =>
+    `  #${h.id} | ${(h.ts || "").slice(0, 10)} | ${firstLine(h.text).slice(0, 150)}`);
+  const context =
+    `Earlier turns in this project mention ${base}. Verbatim excerpts are one ` +
+    `command away -- node "${SELF}" show <id> -- and may be out of date with the ` +
+    `current file:\n${lines.join("\n")}`;
+  process.stdout.write(JSON.stringify({
+    hookSpecificOutput: { hookEventName: "PreToolUse", additionalContext: context },
+  }));
+}
+
 function cmdShow(args) {
   const ids = args.filter((a) => /^#?\d+$/.test(a)).slice(0, 6);
   if (!ids.length) { console.log(`uso: node "${SELF}" show <id> [<id>...]`); return; }
@@ -1117,6 +1215,8 @@ async function main() {
     return void (await cmdIndex(payload.cwd || process.cwd(), false));
   }
   if (cmd === "inject") return cmdInject(await readStdin());
+  if (cmd === "session-start") return cmdSessionStart(await readStdin());
+  if (cmd === "file-context") return cmdFileContext(await readStdin());
   if (cmd === "show") return cmdShow(args);
   if (cmd === "search") return cmdSearch(args);
   if (cmd === "sessions") return cmdSessions(args);

@@ -25,6 +25,23 @@ something.
 That's it. The first session indexes the transcripts Claude Code has already
 been writing all along — nothing new is recorded, and nothing is uploaded.
 
+## It works without you doing anything
+
+Five hooks, all automatic. You never have to invoke anything for the memory to
+work:
+
+| When | What happens | Cost |
+|---|---|---|
+| Session starts | where this project left off: last sessions, files touched, latest decisions | ~110 tokens |
+| You type a prompt | pointers into past turns that share uncommon words with it | ~200 tokens, or **zero** if nothing matches |
+| A file is read or edited | earlier turns that discussed *that file* | ~150 tokens, or **zero** |
+| A skill is invoked | oversized ones are declined with a pointer to the file worth reading | zero |
+| The turn ends | the new turn is indexed | zero |
+
+Every one of them injects nothing when it has nothing worth saying. The
+commands below exist for when you want to dig on purpose — not as a
+requirement for the plugin to do its job.
+
 ## What it does
 
 **Recall.** When what you type shares uncommon words with a past turn in this
