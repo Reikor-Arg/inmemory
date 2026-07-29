@@ -69,6 +69,17 @@ function readJson(file, fallback) {
   }
 }
 
+// FNV-1a: enough to spot an exact duplicate, and it keeps the stored set small.
+// A collision would drop one chunk, not corrupt anything.
+function hashText(t) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < t.length; i++) {
+    h ^= t.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(36) + ":" + t.length;
+}
+
 function writeJson(file, value) {
   fs.writeFileSync(file, JSON.stringify(value));
 }
@@ -258,6 +269,7 @@ export function cmdIndex(cwd, all = false) {
   ensureRoot();
   const meta = readJson(META, { docs: 0, totalLen: 0, files: {} });
   const offsets = readJson(OFFSETS, []);
+  const seenText = new Set(meta.hashes || []);
   const dirs = all
     ? fs.readdirSync(PROJECTS_DIR).map((d) => path.join(PROJECTS_DIR, d))
     : [path.join(PROJECTS_DIR, resolveProject(cwd))];
@@ -290,6 +302,14 @@ export function cmdIndex(cwd, all = false) {
         const finished = Date.now() - mtime > 10 * 60 * 1000;
         const { chunks, resume } = await readNewChunks(full, start, finished);
         for (const c of chunks) {
+          // Byte-identical text carries nothing the first copy did not, and it
+          // competes with real content for the injection budget. On a real
+          // history this was 30% of the index and 24 MB: mostly one other
+          // memory plugin's observer boilerplate, repeated 381 times, plus
+          // /compact markers. Hash only -- the text itself is never stored twice.
+          const h = hashText(c.text);
+          if (seenText.has(h)) continue;
+          seenText.add(h);
           const id = meta.docs++;
           const rec = JSON.stringify({ id, project, session: c.session, ts: c.ts, text: c.text });
           appends.push(rec);
@@ -322,6 +342,8 @@ export function cmdIndex(cwd, all = false) {
       }
       writeJson(file, shard);
     }
+    meta.hashes = [...seenText];
+    meta.hashes = [...seenText];
     writeJson(META, meta);
     writeJson(OFFSETS, offsets);
     return added;
