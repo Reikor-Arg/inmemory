@@ -72,19 +72,28 @@ Then add to `~/.claude/settings.json`, replacing `<HOME>` with your home path:
 ```json
 "hooks": {
   "SessionStart": [{ "matcher": "startup|resume|clear|compact", "hooks": [
-    { "type": "command", "command": "node <HOME>/.claude/inmemory/hooks/recall.mjs session-start", "timeout": 15 }]}],
+    { "type": "command", "command": "sh <HOME>/.claude/inmemory/hooks/run.sh recall.mjs session-start", "timeout": 15 }]}],
   "UserPromptSubmit": [{ "hooks": [
-    { "type": "command", "command": "node <HOME>/.claude/inmemory/hooks/recall.mjs inject", "timeout": 15 }]}],
+    { "type": "command", "command": "sh <HOME>/.claude/inmemory/hooks/run.sh recall.mjs inject", "timeout": 15 }]}],
   "Stop": [{ "hooks": [
-    { "type": "command", "command": "node <HOME>/.claude/inmemory/hooks/recall.mjs hook-index", "timeout": 30 }]}],
+    { "type": "command", "command": "sh <HOME>/.claude/inmemory/hooks/run.sh recall.mjs hook-index", "timeout": 30 }]}],
+  "PreCompact": [{ "hooks": [
+    { "type": "command", "command": "sh <HOME>/.claude/inmemory/hooks/run.sh recall.mjs hook-index", "timeout": 30 }]}],
   "PreToolUse": [
     { "matcher": "Skill", "hooks": [
-      { "type": "command", "command": "node <HOME>/.claude/inmemory/hooks/skill-gate.mjs", "timeout": 10 }]},
+      { "type": "command", "command": "sh <HOME>/.claude/inmemory/hooks/run.sh skill-gate.mjs", "timeout": 10 }]},
     { "matcher": "Read|Edit|Write|NotebookEdit", "hooks": [
-      { "type": "command", "command": "node <HOME>/.claude/inmemory/hooks/recall.mjs file-context", "timeout": 10 }]}
+      { "type": "command", "command": "sh <HOME>/.claude/inmemory/hooks/run.sh recall.mjs file-context", "timeout": 10 }]}
   ]
 }
 ```
+
+`run.sh` is a launcher, not a wrapper with opinions: it finds node and execs it.
+That indirection exists because on macOS and Linux a hook does not run in a login
+shell, so a node installed by nvm, fnm, volta or asdf is on PATH for you and
+invisible to the hook. It checks the usual install locations and, last, asks your
+login shell — and if it finds nothing it exits quietly, which is the same as not
+having the plugin. On Windows the hooks call `node` directly.
 
 Slash commands and skills only come with the plugin install; the hooks above are
 what does the automatic work.
@@ -102,6 +111,7 @@ You never invoke anything. Five hooks do the work:
 | **The context is compacted** | **your own words from this session, in order — the thread that was just summarised away** | **~700 tokens** |
 | You type a prompt | pointers into past turns that share uncommon words with it | ~200 tokens |
 | A file is opened or edited | earlier turns that discussed **that file** | ~150 tokens |
+| **A file is read that was already read, unchanged** | **the read is declined — that copy is still in context** | **saves the whole file** |
 | A skill is invoked | oversized ones are declined, with a pointer to the file worth reading | 0 |
 | The turn ends | the new turn is indexed | 0 |
 
@@ -245,6 +255,36 @@ a plan proposes what the team rejected six months ago, that a component ignores
 the file beside it, or that a PR quietly reverses a recorded decision. Those are
 the failures that cost real time.
 
+## The same file, twice
+
+Reading a file puts it in the context window and it stays there. Reading it
+again, unchanged, puts a second identical copy beside the first and you pay for
+both. A 2,000-line file costs about 25,000 tokens each time.
+
+So before a `Read`, the file's size and modification time are compared against
+what this session already read in full. Identical means the copy in context is
+still accurate, and the read is declined with a note saying so. Anything that
+changes the file — an `Edit`, a `Write`, your own editor — makes the next read
+legitimate again, automatically.
+
+Three cases are never blocked, because in each one the premise is false:
+
+- **Partial reads.** A read with `offset`/`limit` put part of the file in
+  context, and there is no honest way to know if the part wanted now is the part
+  that arrived then.
+- **Anything that changed.** Different size or different mtime, and the copy in
+  context is stale.
+- **After a compaction.** That is the moment the file *leaves* the context, so
+  the record is cleared at the boundary.
+
+This is the one saving here that needs no history: it works in the first hour of
+a fresh install, with an empty index and nothing indexed yet.
+
+On the corpus it was developed against, re-reads of unchanged files were 22.4%
+of everything read from disk. Treat that as evidence the mechanism is worth
+having, not as a number that will hold for you — it is one person's habits on
+one set of projects. Set `INMEMORY_BLOCK_REREADS=0` to turn it off.
+
 ## The skill gate
 
 Invoking a skill inlines its text into the prompt and keeps it there for the
@@ -386,6 +426,7 @@ untouched. `DECISIONS.md` files stay in your repositories, where they belong.
 | `RECALL_BUDGET_TOKENS` | 400 | ceiling on one automatic injection |
 | `RECALL_MIN_COVERAGE` | 0.5 | share of query terms a chunk must contain |
 | `RECALL_MAX_HITS` | 4 | pointers per injection |
+| `INMEMORY_BLOCK_REREADS` | 1 | `0` allows re-reading an unchanged file |
 | `SKILL_WEIGHT_LIMIT` | 120000 | bytes above which a skill is declined |
 | `SKILL_WEIGHT_ALLOW` | — | comma-separated skills to always allow |
 

@@ -3,6 +3,25 @@
 Newest first. Every figure quoted here was measured on a real session, not
 estimated.
 
+## 2.9.0 — two things a fresh install gets on day one
+
+**The POSIX hooks had never been run.** They were `command -v node || exit 0`:
+correct, fail-open, and on macOS or Linux with node from nvm, fnm, volta or asdf
+they would have found nothing and left the plugin silently inert — a failure
+indistinguishable from working and having nothing to say. Hooks now go through
+`hooks/run.sh`, which checks the usual install locations and, last, asks the
+login shell. Windows is unchanged.
+
+**Reading the same unchanged file twice is now declined.** The second copy is
+identical to the one already in context and costs the same tokens again. Size
+and mtime decide; an edit, a partial read, or a compaction all make the next read
+legitimate. Needs no index, so it works from the first hour rather than after a
+corpus accumulates. `INMEMORY_BLOCK_REREADS=0` disables it.
+
+Both of these are aimed at someone who just installed the plugin, which the
+previous releases were not: nearly everything else here needs history it does
+not have yet.
+
 ## 2.8.2
 
 The post-compaction recap announced itself without the token count. It reads the

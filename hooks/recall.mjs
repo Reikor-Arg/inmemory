@@ -688,9 +688,13 @@ async function cmdSessionStart(payload) {
   // compact_boundary written moments ago is a fact on disk rather than a guess
   // about an API that may be renamed.
   if ((payload && payload.source === "compact") || justCompacted(payload)) {
+    // Everything read before the boundary has just left the context, so the
+    // record saying "you already have this" is now false. Drop it.
+    clearReads(payload && payload.session_id);
     const recap = await compactRecap(payload);
     if (recap) { console.log(recap); return; }
   }
+  pruneReads();
 
   let update = null;
   try { update = await updateNotice(); } catch { /* never block the session */ }
@@ -737,10 +741,104 @@ async function cmdSessionStart(payload) {
   console.log(lines.join("\n"));
 }
 
+// ------------------------------------------------------------- re-reads
+//
+// A file read twice with nothing changed in between is paid for twice: the
+// first copy is still sitting in the context window, word for word. This is the
+// one saving here that needs no history at all -- it works in the first hour of
+// a fresh install, with an empty index.
+//
+// Only whole-file reads are tracked. A read with offset/limit put *part* of the
+// file in context, and there is no honest way to tell whether the part wanted
+// now is the part that arrived then, so those are never blocked.
+//
+// The record is cleared at a compaction, because that is exactly the moment the
+// premise stops holding: the file was in context, and now it is not.
+
+const READS_DIR = path.join(ROOT, "reads");
+const BLOCK_REREADS = process.env.INMEMORY_BLOCK_REREADS !== "0";
+
+const readsFile = (session) =>
+  path.join(READS_DIR, `${String(session).replace(/[^A-Za-z0-9_-]/g, "")}.json`);
+
+function saveReads(session, map) {
+  try {
+    fs.mkdirSync(READS_DIR, { recursive: true });
+    fs.writeFileSync(readsFile(session), JSON.stringify(map));
+  } catch { /* read-only disk: tracking is an optimisation, never a requirement */ }
+}
+
+export function clearReads(session) {
+  try { fs.unlinkSync(readsFile(session)); } catch { /* nothing to clear */ }
+}
+
+// Sessions end without telling anyone, so their records are swept on the next
+// session start rather than tracked.
+function pruneReads() {
+  const cutoff = Date.now() - 2 * 24 * 60 * 60 * 1000;
+  let names;
+  try { names = fs.readdirSync(READS_DIR); } catch { return; }
+  for (const n of names) {
+    const f = path.join(READS_DIR, n);
+    try { if (fs.statSync(f).mtimeMs < cutoff) fs.unlinkSync(f); } catch { /* gone already */ }
+  }
+}
+
+export function rereadVerdict(payload) {
+  const input = payload.tool_input || {};
+  const target = input.file_path || input.notebook_path;
+  const session = payload.session_id;
+  if (!target || !session) return null;
+
+  const key = path.resolve(String(target));
+  const reads = readJson(readsFile(session), {});
+
+  if (payload.tool_name !== "Read") {
+    // An edit invalidates the copy in context: the next read is earned.
+    if (reads[key]) { delete reads[key]; saveReads(session, reads); }
+    return null;
+  }
+  if (input.offset !== undefined || input.limit !== undefined) return null;
+
+  let st;
+  try { st = fs.statSync(key); } catch { return null; }
+  // A directory read returns a listing, not a file, and is cheap either way.
+  if (!st.isFile()) return null;
+
+  const prev = reads[key];
+  if (prev && prev[0] === st.mtimeMs && prev[1] === st.size) return { key, when: prev[2] };
+
+  reads[key] = [st.mtimeMs, st.size, new Date().toISOString().slice(11, 16)];
+  saveReads(session, reads);
+  return null;
+}
+
+function denyReread(v) {
+  process.stdout.write(JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason:
+        `${v.key} was already read in full at ${v.when} in this session, and has not ` +
+        `changed since -- same size, same modification time. Its contents are already ` +
+        `in the context above, word for word. Use that copy rather than paying for a ` +
+        `second one.\n\n` +
+        `Reading it again is allowed as soon as something changes it. To see one part ` +
+        `of a large file, read it with offset/limit -- partial reads are never blocked.`,
+    },
+  }));
+}
+
 // Fired before a file is read or edited. If that file has been discussed
 // before, say so now -- this is the moment the context is worth having, and
 // the only moment it can be delivered without the model knowing to ask.
 function cmdFileContext(payload) {
+  if (BLOCK_REREADS) {
+    let verdict = null;
+    try { verdict = rereadVerdict(payload || {}); } catch { /* fail open */ }
+    if (verdict) return denyReread(verdict);
+  }
+
   const input = (payload && payload.tool_input) || {};
   const target = input.file_path || input.notebook_path;
   if (!target) return;
@@ -1623,6 +1721,38 @@ async function selftest() {
   assert(isoWeek("2026-01-01T00:00:00Z") === "2026-W01", "ISO week of Jan 1 wrong: " + isoWeek("2026-01-01T00:00:00Z"));
   assert(isoWeek("2026-12-31T00:00:00Z") === "2026-W53", "ISO week of Dec 31 wrong: " + isoWeek("2026-12-31T00:00:00Z"));
   assert(isoWeek("no es fecha") === "unknown", "fecha invalida no manejada");
+
+  // Re-read blocking denies a tool call, so every branch that decides "you
+  // already have this" is checked. A false positive here hides a file the model
+  // genuinely needs, which is worse than the tokens it saves.
+  const sess = "selftest-rereads";
+  const probe = path.join(os.tmpdir(), `inmemory-selftest-${process.pid}.txt`);
+  fs.writeFileSync(probe, "uno");
+  clearReads(sess);
+  const read = (extra = {}) =>
+    rereadVerdict({ tool_name: "Read", session_id: sess, tool_input: { file_path: probe, ...extra } });
+
+  assert(read() === null, "la primera lectura no se puede bloquear");
+  assert(read() !== null, "la segunda lectura identica debia bloquearse");
+  assert(read({ offset: 10 }) === null, "una lectura parcial nunca se bloquea");
+
+  fs.writeFileSync(probe, "uno y algo mas");   // distinto tamano -> distinto contenido
+  assert(read() === null, "el archivo cambio: hay que dejar releer");
+  assert(read() !== null, "deberia volver a bloquear tras registrar el cambio");
+
+  rereadVerdict({ tool_name: "Edit", session_id: sess, tool_input: { file_path: probe } });
+  assert(read() === null, "tras editar, la relectura esta ganada");
+
+  read();
+  clearReads(sess);
+  assert(read() === null, "compactar borra el registro: el archivo ya no esta en contexto");
+
+  assert(rereadVerdict({ tool_name: "Read", session_id: sess,
+    tool_input: { file_path: path.join(os.tmpdir(), "no-existe-inmemory") } }) === null,
+    "un archivo inexistente no se juzga");
+
+  clearReads(sess);
+  try { fs.unlinkSync(probe); } catch { /* ya no esta */ }
 
   console.log("OK: selftest passed");
 }

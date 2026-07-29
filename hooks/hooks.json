@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/hooks/recall.mjs\" session-start || exit 0",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" recall.mjs session-start",
             "commandWindows": "if (Get-Command node -ErrorAction SilentlyContinue) { node \"$env:CLAUDE_PLUGIN_ROOT\\hooks\\recall.mjs\" session-start }",
             "timeout": 15
           }
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/hooks/recall.mjs\" inject || exit 0",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" recall.mjs inject",
             "commandWindows": "if (Get-Command node -ErrorAction SilentlyContinue) { node \"$env:CLAUDE_PLUGIN_ROOT\\hooks\\recall.mjs\" inject }",
             "timeout": 15
           }
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/hooks/recall.mjs\" hook-index || exit 0",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" recall.mjs hook-index",
             "commandWindows": "if (Get-Command node -ErrorAction SilentlyContinue) { node \"$env:CLAUDE_PLUGIN_ROOT\\hooks\\recall.mjs\" hook-index }",
             "timeout": 30
           }
@@ -43,7 +43,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/hooks/skill-gate.mjs\" || exit 0",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" skill-gate.mjs",
             "commandWindows": "if (Get-Command node -ErrorAction SilentlyContinue) { node \"$env:CLAUDE_PLUGIN_ROOT\\hooks\\skill-gate.mjs\" }",
             "timeout": 10
           }
@@ -54,7 +54,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/hooks/recall.mjs\" file-context || exit 0",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" recall.mjs file-context",
             "commandWindows": "if (Get-Command node -ErrorAction SilentlyContinue) { node \"$env:CLAUDE_PLUGIN_ROOT\\hooks\\recall.mjs\" file-context }",
             "timeout": 10
           }
@@ -66,7 +66,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "command -v node >/dev/null 2>&1 && node \"${CLAUDE_PLUGIN_ROOT}/hooks/recall.mjs\" hook-index || exit 0",
+            "command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/run.sh\" recall.mjs hook-index",
             "commandWindows": "if (Get-Command node -ErrorAction SilentlyContinue) { node \"$env:CLAUDE_PLUGIN_ROOT\\hooks\\recall.mjs\" hook-index }",
             "timeout": 30
           }
