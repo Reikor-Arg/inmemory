@@ -176,7 +176,7 @@ export function splitTurn(user, parts) {
 // Reads new bytes of one transcript and yields complete turns.
 // The trailing turn is withheld: it may still be growing, so `resume` points at
 // its start and the next run re-reads it once it is finished.
-async function readNewChunks(file, startOffset) {
+async function readNewChunks(file, startOffset, final = false) {
   const session = path.basename(file).replace(/\.jsonl$/, "");
   const out = [];
   let curUser = null, buf = [], seen = new Set(), chunkStart = startOffset;
@@ -218,6 +218,15 @@ async function readNewChunks(file, startOffset) {
       buf.push(...assistantParts(msg.content));
       if (!ts) ts = d.timestamp || "";
     }
+  }
+  // A finished session's last turn would otherwise never be indexed: it is
+  // withheld each pass in case it is still growing, and once the session ends
+  // nothing ever completes it. So the final thing done in every session was
+  // missing from the index -- caught by doctor reporting 797 transcripts behind
+  // immediately after a full backfill.
+  if (final) {
+    flush();
+    return { chunks: out, resume: pos };
   }
   return { chunks: out, resume: buf.length || curUser ? chunkStart : pos };
 }
@@ -271,11 +280,15 @@ export function cmdIndex(cwd, all = false) {
       for (const f of files) {
         const full = path.join(dir, f);
         let start = meta.files[full] || 0;
-        let size;
-        try { size = fs.statSync(full).size; } catch { continue; }
+        let size, mtime;
+        try { const st = fs.statSync(full); size = st.size; mtime = st.mtimeMs; }
+        catch { continue; }
         if (size < start) start = 0; // truncated or replaced: reindex
         if (size === start) continue;
-        const { chunks, resume } = await readNewChunks(full, start);
+        // Untouched for a while means the session is over, so its trailing turn
+        // is complete and safe to index rather than withhold forever.
+        const finished = Date.now() - mtime > 10 * 60 * 1000;
+        const { chunks, resume } = await readNewChunks(full, start, finished);
         for (const c of chunks) {
           const id = meta.docs++;
           const rec = JSON.stringify({ id, project, session: c.session, ts: c.ts, text: c.text });
@@ -1335,6 +1348,31 @@ function cmdDoctor() {
         `No transcripts in ${PROJECTS_DIR}. Claude Code writes them itself -- ` +
         "if this is a fresh install there is simply nothing to index yet.");
 
+  // "The index exists" is not "the index is current". This check was added
+  // after doctor reported everything OK while sitting four hours behind: the
+  // Stop hook had not been running, and nothing said so. Comparing the stored
+  // read offset against the file size is the only way to see it.
+  let behind = 0;
+  try {
+    const files = (meta && meta.files) || {};
+    for (const dir of fs.readdirSync(PROJECTS_DIR)) {
+      const full = path.join(PROJECTS_DIR, dir);
+      for (const f of fs.readdirSync(full).filter((x) => x.endsWith(".jsonl"))) {
+        const p = path.join(full, f);
+        const st = fs.statSync(p);
+        // Only sessions that have finished. A live session always has an
+        // unindexed trailing turn by design, and flagging that would mean the
+        // check is red whenever anyone is working.
+        if (Date.now() - st.mtimeMs < 10 * 60 * 1000) continue;
+        if (st.size - (files[p] || 0) > 2000) behind++;
+      }
+    }
+  } catch (e) { behind = -1; process.stderr.write(`staleness check skipped: ${e.message}\n`); }
+  if (behind >= 0) {
+    check(behind === 0, "Index is up to date with every transcript",
+          `${behind} transcript(s) have content not yet indexed. Run:  index --all`);
+  }
+
   const project = resolveProject(process.cwd());
   const here = fs.existsSync(path.join(PROJECTS_DIR, project));
   note(here, `This directory maps to project "${project}"`,
@@ -1418,6 +1456,15 @@ async function selftest() {
 
   const again = await readNewChunks(file, resume);
   assert(again.chunks.length === 0, "reindexo lo ya emitido");
+
+  // Una sesion terminada tiene que entregar su ultimo turno, o se pierde para
+  // siempre: se retiene cada pasada por si sigue creciendo, y al terminar la
+  // sesion nada lo completa. Faltaba el turno final de CADA sesion -- 4.076
+  // chunks sobre 14.268 en un historial real.
+  const done = await readNewChunks(file, 0, true);
+  assert(done.chunks.length === 2,
+    `sesion terminada debe emitir 2 turnos, emitio ${done.chunks.length}`);
+  assert(done.chunks[1].text.includes("segundo pedido"), "perdio el turno final");
 
   assert(splitTurn("u", ["a".repeat(5000), "b".repeat(5000)]).length === 2,
     "no partio la vuelta larga");
