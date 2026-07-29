@@ -10,10 +10,10 @@ found two defects that had shipped in every release, neither visible by reading
 the code:
 
 - **Node 14 was never supported.** The README claimed it since 1.0.0; the index
-  builder uses , which is Node 15. The floor is 18 now, and it is tested
+  builder uses `||=`, which is Node 15. The floor is 18 now, and it is tested
   rather than asserted.
 - **run.sh depended on PATH to cope with a broken PATH.** It took its own
-  directory from , an external binary resolved through PATH — so in the
+  directory from `dirname`, an external binary resolved through PATH — so in the
   exact degraded environment the launcher exists to survive, it handed node a
   path that could not exist. Parameter expansion now; nothing in it touches PATH.
 
