@@ -40,13 +40,7 @@ you do.
 **4. Index the history you already have** (optional, about 25 seconds):
 
 ```
-/recall --global anything
-```
-
-Or, from a terminal:
-
-```
-node ~/.claude/plugins/*/inmemory/*/hooks/recall.mjs index --all
+/reindex
 ```
 
 Without this, history is indexed project by project as you open each one, which
@@ -160,6 +154,7 @@ turns index in about 25 seconds and cost nothing.
 | `/how-it-works` | what the plugin does, what it costs, what it cannot do |
 | `/doctor` | check the install and report anything wrong |
 | `/lint` | instructions written for older models, and what your prompts cost per turn |
+| `/reindex` | one-time backfill of every project's history |
 
 All computed from the index. None of them run a model, so none of them cost
 tokens to *produce* — only the output you actually read.
