@@ -54,4 +54,11 @@ fi
 
 [ -n "$node_bin" ] || exit 0
 
-exec "$node_bin" "$(dirname "$0")/$script" "$@"
+# Parameter expansion, not `dirname`. dirname is an external binary resolved
+# through PATH, and this script exists precisely for the case where PATH is not
+# what the user thinks it is -- CI caught it launching `/recall.mjs` because
+# dirname itself could not be found. Nothing here may depend on PATH.
+dir=${0%/*}
+[ "$dir" = "$0" ] && dir=.
+
+exec "$node_bin" "$dir/$script" "$@"
