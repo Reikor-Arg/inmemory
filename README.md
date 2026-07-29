@@ -112,8 +112,17 @@ between memory that helps and memory that is just a tax.
 ## Compaction stops being a loss
 
 When the context fills, Claude Code replaces the conversation with a summary.
-One real compaction discarded 633,393 tokens. What survives is a paraphrase of
-what happened, which is where the thread goes.
+Here is a real one, from the boundary record Claude Code itself writes:
+
+```
+preTokens:   985,335      <- what the conversation held
+postTokens:   19,066      <- what survived
+durationMs:  129,320      <- 2 min 9 s of summarising
+```
+
+966,269 tokens became a paraphrase of themselves. That is where the thread goes:
+not deleted, *reworded*, and the wording that goes missing is the specific
+one — the variable name, the error string, why approach B was rejected.
 
 The transcript on disk is untouched — compaction rewrites context, never the
 record. So the moment it happens, this reads the session's own transcript and
@@ -121,22 +130,30 @@ hands back what you actually asked for, in your words, in order:
 
 ```
 <compacted_session_recall>
-This session was compacted (633,393 tokens of context replaced by a summary).
+This session was compacted (985,335 tokens of context replaced by a summary).
 What the user actually asked for, in their own words, in order:
   ok pero para, yo no quiero que alguien tenga que andar tirando slashes...
   si hablamos en porcentaje, cuanto pierde menos el hilo...
   ...
 Files touched: recall.mjs, hooks.json, README.md
+Recent commands: node hooks/recall.mjs doctor
 </compacted_session_recall>
 ```
 
-About 700 tokens to restore a thread that cost hundreds of thousands to lose.
-It is deliberately your words and not a second summary — a summary of a summary
-is how the detail disappears in the first place. Anything older is one `search`
-away, verbatim.
+About 700 tokens to restore a thread that cost 966,269 to lose. It is
+deliberately your words and not a second summary — a summary of a summary is how
+the detail disappears in the first place. Anything older is one `search` away,
+verbatim.
+
+**It arrives on its own, at the boundary.** Not on your next question, and not
+only if your next question happens to match something: the point of failure
+after a compaction is that you no longer know what to ask for.
 
 A `PreCompact` hook also flushes the index first, so nothing that happened just
 before the boundary is missing afterwards.
+
+Both halves have now run in a real compaction rather than a simulated one — the
+figures above are that run.
 
 ## What it looks like
 
@@ -241,11 +258,26 @@ Nothing becomes unreachable; the expensive path just stops being automatic.
 
 ## Honest limits
 
-**Retrieval is lexical.** Ask about "network errors" when the session said
-"socket timeout", with no word in common, and it will not find it. Query
-expansion was built, measured, and removed: it dragged in unrelated results, and
-a wrong hit costs tokens *and* sends work down the wrong path. A miss is honest
-and free.
+**Retrieval is lexical, and here is what that costs.** Measured over 60 real
+questions across 22 projects, counting a hit only when it returned the right
+project *and* the right moment:
+
+| How the question was worded | Found it |
+|---|---|
+| The words actually used at the time | **90.0%** |
+| Same, minus the two rarest words | 88.3% |
+| Reworded, 13.6% vocabulary in common | **20.0%** |
+
+That 20% is the real limit, not the 90%. Ask about "network errors" when the
+session said "socket timeout", with no word in common, and it will not find it.
+Query expansion was built to close exactly this gap, measured, and removed: it
+dragged in unrelated results, and a wrong hit costs tokens *and* sends work down
+the wrong path. A miss is honest and free.
+
+One machine, one corpus, one user — treat the figures as a shape, not a
+benchmark. The rewording test also avoided reusing file and command names on
+purpose, which a real person does reuse, so 20% is a floor rather than an
+average.
 
 **It only knows what was written down.** Reasoning that stayed in a thinking
 block, and work done outside Claude Code, are not there.
@@ -297,6 +329,9 @@ that a login shell has and the hook shell does not. `node --version` from a
 plain terminal is the first check.
 
 ## Updating
+
+What changed in each release, and what it was measured against:
+[CHANGELOG.md](CHANGELOG.md).
 
 Claude can do it for you — the CLI exists, so asking it to update the plugin
 works:
