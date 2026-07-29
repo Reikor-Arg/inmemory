@@ -268,9 +268,23 @@ plain terminal is the first check.
 
 ## Updating
 
+At most once a day, when a session starts, it checks GitHub for a newer release
+and adds one line if there is one. An HTTPS request and a string compare — no
+model runs, so it costs nothing beyond the ~25 tokens of the notice itself, and
+only when there is something to say. Set `INMEMORY_UPDATE_CHECK=0` to turn it
+off. It fails silently: no network, no notice, no delay beyond a 3-second cap.
+
+To actually update:
+
 ```
 /plugin marketplace update inmemory
 ```
+
+**It notifies; it does not install.** Plugins installed through `/plugin` live
+in a cache Claude Code manages, so a plugin that updated itself there would be
+fighting the platform's own mechanism, and the breakage is hard to trace back.
+Beyond that, this is code that runs on every turn — it should not rewrite
+itself while nobody is looking.
 
 The index format is stable across versions. If a release ever needs a rebuild,
 the notes will say so; deleting `~/.claude/recall/` always forces one safely.

@@ -482,12 +482,75 @@ function cmdInject(payload) {
 // off, in a couple of hundred tokens. The alternative is the model opening
 // cold and spending far more than that rediscovering the same thing with Glob
 // and Grep -- or worse, not rediscovering it and asking the user.
-function cmdSessionStart(payload) {
+// Checks GitHub for a newer release, at most once a day, and returns one line
+// if there is one. Costs no model tokens -- it is an HTTPS GET and a string
+// compare.
+//
+// It reports; it does not install. Plugins installed through /plugin live in a
+// cache Claude Code manages, so a self-update fights the platform's own
+// mechanism and breaks in ways that are hard to trace back. Beyond that, code
+// that runs on every turn should not rewrite itself while nobody is looking.
+//
+// Set INMEMORY_UPDATE_CHECK=0 to switch it off.
+function updateNotice() {
+  if (process.env.INMEMORY_UPDATE_CHECK === "0") return Promise.resolve(null);
+  const stamp = path.join(ROOT, ".update-check");
+  const now = Date.now();
+  try {
+    const last = Number(fs.readFileSync(stamp, "utf8"));
+    if (now - last < 24 * 3600 * 1000) return Promise.resolve(null);
+  } catch { /* never checked */ }
+
+  let local = null;
+  try {
+    local = JSON.parse(fs.readFileSync(
+      path.join(HERE, "..", ".claude-plugin", "plugin.json"), "utf8")).version;
+  } catch { return Promise.resolve(null); }
+  if (!local) return Promise.resolve(null);
+
+  return new Promise((resolve) => {
+    // Stamped before the request, not after: a network that hangs must not turn
+    // into a check on every single session.
+    try { ensureRoot(); fs.writeFileSync(stamp, String(now)); } catch { /* read-only */ }
+    const url = "https://raw.githubusercontent.com/Reikor-Arg/inmemory/main/.claude-plugin/plugin.json";
+    const done = (v) => resolve(v);
+    let settled = false;
+    const finish = (v) => { if (!settled) { settled = true; done(v); } };
+    setTimeout(() => finish(null), 3000).unref?.();
+    import("node:https").then(({ get }) => {
+      const req = get(url, { headers: { "User-Agent": "inmemory" } }, (res) => {
+        if (res.statusCode !== 200) { res.resume(); return finish(null); }
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (d) => (body += d));
+        res.on("end", () => {
+          try {
+            const remote = JSON.parse(body).version;
+            finish(remote && remote !== local
+              ? `inmemory ${remote} is available (you have ${local}) -- update with: /plugin marketplace update inmemory`
+              : null);
+          } catch { finish(null); }
+        });
+      });
+      req.on("error", () => finish(null));
+      req.setTimeout(3000, () => { req.destroy(); finish(null); });
+    }).catch(() => finish(null));
+  });
+}
+
+async function cmdSessionStart(payload) {
   const cwd = (payload && payload.cwd) || process.cwd();
   const project = resolveProject(cwd);
+  let update = null;
+  try { update = await updateNotice(); } catch { /* never block the session */ }
+
   let sessions;
-  try { sessions = scanSessions(project); } catch { return; }
-  if (!sessions.length) return; // first time in this project: nothing to say
+  try { sessions = scanSessions(project); } catch { sessions = []; }
+  if (!sessions.length) {
+    // Nothing to orient with, but a pending update is still worth one line.
+    if (update) console.log(`<project_memory>\n${update}\n</project_memory>`);
+    return;
+  }
 
   const recent = sessions.slice(0, 3);
   const files = new Map();
@@ -518,6 +581,7 @@ function cmdSessionStart(payload) {
     lines.push("Latest recorded decisions:");
     for (const d of decisions) lines.push(`  ${d.slice(0, 160)}`);
   }
+  if (update) lines.push(update);
   lines.push("</project_memory>");
   console.log(lines.join("\n"));
 }

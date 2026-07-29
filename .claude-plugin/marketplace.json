@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "inmemory",
-      "version": "2.4.0",
+      "version": "2.5.0",
       "description": "Gives Claude Code back the exact words from past sessions instead of a summary of them. Automatic: context arrives when you open a project, type a prompt, or touch a file, and nothing is injected when nothing matches. No dependencies, no API calls, nothing leaves your machine.",
       "source": "./",
       "category": "Productivity"
