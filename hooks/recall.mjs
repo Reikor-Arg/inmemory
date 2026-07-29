@@ -704,6 +704,130 @@ function cmdTopics(args) {
 Search any of them: search <term>`);
 }
 
+// ------------------------------------------------------------------ code map
+
+// One regex per language for *declarations only*. Deliberately shallow: this is
+// a map, not a parser. A tree-sitter grammar would be more accurate and would
+// also be a native dependency, which is the one thing this plugin refuses to
+// have. Missing an exotic declaration costs a line in an overview; requiring a
+// compiler at install time costs the user entirely.
+const SYMBOL_RES = [
+  [/\.(m|c)?[jt]sx?$/, /^\s*(?:export\s+)?(?:async\s+)?(?:function|class)\s+([A-Za-z_$][\w$]*)/gm],
+  [/\.(m|c)?[jt]sx?$/, /^\s*(?:export\s+)?(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\(/gm],
+  [/\.py$/, /^\s*(?:async\s+)?(?:def|class)\s+([A-Za-z_][\w]*)/gm],
+  [/\.go$/, /^\s*func\s+(?:\([^)]*\)\s*)?([A-Za-z_][\w]*)/gm],
+  [/\.(php|inc)$/, /^\s*(?:abstract\s+|final\s+)?(?:function|class|trait|interface)\s+([A-Za-z_][\w]*)/gm],
+  [/\.(rb)$/, /^\s*(?:def|class|module)\s+([A-Za-z_][\w:]*)/gm],
+  [/\.(java|kt|cs)$/, /^\s*(?:public|private|protected|internal)?[\w\s<>\[\]]*?(?:class|interface|record|fun)\s+([A-Za-z_][\w]*)/gm],
+  [/\.(sh|bash)$/, /^\s*(?:function\s+)?([A-Za-z_][\w-]*)\s*\(\)\s*\{/gm],
+];
+
+const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", "vendor",
+  "__pycache__", ".venv", "venv", "target", ".next", "coverage", ".cache"]);
+const MAX_FILE_BYTES = 400_000;
+
+function mapPath(project) {
+  return path.join(ROOT, `map-${project}.json`);
+}
+
+function scanRepo(root) {
+  const files = [];
+  const walk = (dir, depth) => {
+    if (depth > 12) return;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.name.startsWith(".") && e.name !== ".github") continue;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (!SKIP_DIRS.has(e.name)) walk(full, depth + 1);
+      } else if (e.isFile()) {
+        files.push(full);
+      }
+    }
+  };
+  walk(root, 0);
+
+  const out = [];
+  for (const full of files) {
+    const rel = path.relative(root, full).split(path.sep).join("/");
+    let size;
+    try { size = fs.statSync(full).size; } catch { continue; }
+    const symbols = [];
+    if (size <= MAX_FILE_BYTES) {
+      let text = null;
+      for (const [ext, re] of SYMBOL_RES) {
+        if (!ext.test(rel)) continue;
+        if (text === null) {
+          try { text = fs.readFileSync(full, "utf8"); } catch { text = ""; }
+        }
+        re.lastIndex = 0;
+        let m;
+        while ((m = re.exec(text)) !== null) {
+          if (m[1] && !symbols.includes(m[1]) && symbols.length < 60) symbols.push(m[1]);
+        }
+      }
+    }
+    out.push({ path: rel, size, symbols });
+  }
+  return out;
+}
+
+function cmdMap(args) {
+  const project = resolveProject(process.cwd());
+  const file = mapPath(project);
+  const refresh = args.includes("--refresh") || !fs.existsSync(file);
+  const needle = args.filter((a) => !a.startsWith("--")).join(" ").trim().toLowerCase();
+
+  let data;
+  if (refresh) {
+    ensureRoot();
+    data = { root: process.cwd(), scannedAt: new Date().toISOString(), files: scanRepo(process.cwd()) };
+    writeJson(file, data);
+  } else {
+    data = readJson(file, null);
+    if (!data) { console.log("No map yet. Run: map --refresh"); return; }
+  }
+
+  const files = data.files || [];
+  if (!files.length) { console.log("No source files found under " + data.root); return; }
+
+  if (needle) {
+    // Looking for one thing: answer where it is, not what the project looks like.
+    const hits = files.filter((f) =>
+      f.path.toLowerCase().includes(needle) ||
+      f.symbols.some((s) => s.toLowerCase().includes(needle)));
+    if (!hits.length) { console.log(`No file or symbol matching "${needle}".`); return; }
+    for (const f of hits.slice(0, 25)) {
+      const matched = f.symbols.filter((s) => s.toLowerCase().includes(needle));
+      console.log(`  ${f.path}${matched.length ? "  ->  " + matched.slice(0, 8).join(", ") : ""}`);
+    }
+    return;
+  }
+
+  const byDir = new Map();
+  for (const f of files) {
+    const dir = f.path.includes("/") ? f.path.slice(0, f.path.lastIndexOf("/")) : ".";
+    if (!byDir.has(dir)) byDir.set(dir, []);
+    byDir.get(dir).push(f);
+  }
+  const total = files.reduce((n, f) => n + f.symbols.length, 0);
+  console.log(`${data.root}`);
+  console.log(`${files.length} files, ${total} declarations, scanned ${data.scannedAt.slice(0, 16)}
+`);
+  for (const [dir, group] of [...byDir.entries()].sort()) {
+    const syms = group.reduce((n, f) => n + f.symbols.length, 0);
+    console.log(`${dir}/  (${group.length} files${syms ? `, ${syms} declarations` : ""})`);
+    for (const f of group.sort((a, b) => b.symbols.length - a.symbols.length).slice(0, 6)) {
+      const name = f.path.split("/").pop();
+      console.log(`    ${name}${f.symbols.length ? "  " + f.symbols.slice(0, 6).join(", ") : ""}`);
+    }
+    if (group.length > 6) console.log(`    ... ${group.length - 6} more`);
+  }
+  console.log(`
+Stale? Re-run with --refresh. Find one thing: map <name>`);
+}
+
 function cmdRules() {
   // Next to this file, or one level up: the plugin layout puts hooks/ under
   // the plugin root while ground_rules.md sits at the root, and a standalone
@@ -807,9 +931,10 @@ async function main() {
   if (cmd === "timeline") return cmdTimeline(args);
   if (cmd === "digest") return cmdDigest(args);
   if (cmd === "topics") return cmdTopics(args);
+  if (cmd === "map") return cmdMap(args);
   if (cmd === "rules") return cmdRules();
   if (cmd === "stats") return cmdStats();
-  console.log("usage: recall.mjs [index|inject|search|show|sessions|timeline|digest|topics|rules|stats|--selftest]");
+  console.log("usage: recall.mjs [index|inject|search|show|sessions|timeline|digest|topics|map|rules|stats|--selftest]");
 }
 
 function readStdin() {
