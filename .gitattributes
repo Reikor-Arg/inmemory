@@ -1,0 +1,8 @@
+# A shell script with CRLF endings dies on Linux and macOS with a
+# 'bad interpreter: /bin/sh^M' that says nothing about the real cause.
+# This is the launcher that exists to make those platforms work, so its
+# line endings are not left to whatever the contributor's git is set to.
+*.sh text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.md text eol=lf
