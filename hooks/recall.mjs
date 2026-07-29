@@ -909,6 +909,54 @@ function cmdDuplicates(args) {
   console.log(`several times looks identical to a concern copy-pasted. Read before merging.`);
 }
 
+// ---------------------------------------------------------------- decisions
+
+// Decisions live in the transcript like everything else, which means one made
+// in turn 47 of a long session is effectively lost: findable only by someone
+// who already remembers enough to search for it. Recording it costs one line
+// and makes it retrievable by subject forever.
+//
+// Stored as plain Markdown in the repo, not in the index: a decision is
+// something the team should see in a diff and argue with, not a private note
+// on one machine. The index picks it up like any other file the user writes.
+function decisionsFile() {
+  return path.join(process.cwd(), "DECISIONS.md");
+}
+
+function cmdDecide(args) {
+  const file = decisionsFile();
+  if (args.includes("--list") || !args.filter((a) => !a.startsWith("--")).length) {
+    let body;
+    try { body = fs.readFileSync(file, "utf8"); } catch {
+      console.log(`No decisions recorded yet in ${file}.`);
+      console.log(`Record one:  decide "chose X over Y because Z"`);
+      return;
+    }
+    const needle = args.filter((a) => !a.startsWith("--")).join(" ").toLowerCase();
+    const entries = body.split(/^## /m).slice(1);
+    const hits = needle ? entries.filter((e) => e.toLowerCase().includes(needle)) : entries;
+    if (!hits.length) { console.log(`No decision matching "${needle}".`); return; }
+    for (const e of hits.slice(-20)) console.log("## " + e.trimEnd() + "\n");
+    return;
+  }
+
+  const text = args.filter((a) => !a.startsWith("--")).join(" ").trim();
+  const date = new Date().toISOString().slice(0, 10);
+  const branch = git(["rev-parse", "--abbrev-ref", "HEAD"], process.cwd());
+  const header = fs.existsSync(file) ? "" :
+    "# Decisions\n\nAppend-only. Each entry is what was decided, in the words used at the time.\n" +
+    "Superseding a decision means adding a new entry that says so -- not editing the old one,\n" +
+    "which would erase the reason anyone chose differently.\n";
+  const entry = `\n## ${date}${branch ? ` (${branch})` : ""}\n\n${text}\n`;
+  try {
+    fs.appendFileSync(file, header + entry);
+  } catch (e) {
+    console.log(`Could not write ${file}: ${e.message}`);
+    return;
+  }
+  console.log(`Recorded in ${file}:\n${entry.trim()}`);
+}
+
 // ------------------------------------------------------------------ standup
 
 function git(args, cwd) {
@@ -1081,9 +1129,10 @@ async function main() {
   if (cmd === "map") return cmdMap(args);
   if (cmd === "duplicates") return cmdDuplicates(args);
   if (cmd === "standup") return cmdStandup(args);
+  if (cmd === "decide") return cmdDecide(args);
   if (cmd === "rules") return cmdRules();
   if (cmd === "stats") return cmdStats();
-  console.log("usage: recall.mjs [index|inject|search|show|sessions|timeline|digest|topics|map|duplicates|standup|rules|stats|--selftest]");
+  console.log("usage: recall.mjs [index|inject|search|show|sessions|timeline|digest|topics|map|duplicates|standup|decide|rules|stats|--selftest]");
 }
 
 function readStdin() {

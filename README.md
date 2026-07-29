@@ -57,6 +57,7 @@ being the automatic one.
 | `/map [name]` | the repo's layout and declarations, or which file declares `name` |
 | `/duplicates` | the same name declared in several files; filenames reused across directories |
 | `/standup` | uncommitted work, branches active recently, how far each is from the default |
+| `/decide` | record why something was decided, so the reason outlives the session |
 
 `timeline` and `digest` are the trace: what you worked on, when, in your own
 words. They are computed from the index, so they cost **no tokens to produce** —
@@ -71,6 +72,7 @@ node <plugin>/hooks/recall.mjs topics [--top=N]
 node <plugin>/hooks/recall.mjs map [--refresh] [name]
 node <plugin>/hooks/recall.mjs duplicates [--refresh]
 node <plugin>/hooks/recall.mjs standup [--days=N]
+node <plugin>/hooks/recall.mjs decide "<what and why>" | --list [term]
 node <plugin>/hooks/recall.mjs sessions [--global] [filter]   # one line per session
 node <plugin>/hooks/recall.mjs show <id>                      # verbatim text of a pointer
 node <plugin>/hooks/recall.mjs index --all                    # backfill every project (~25 s)
@@ -96,6 +98,16 @@ No background model runs. Reports are computed from the index and handed to
 Claude as raw material; Claude writes the narrative when you ask for one, and
 only then. Nothing is generated while you are not looking, so nothing is
 generated wrong while you are not looking either.
+
+## Decisions
+
+A decision made in turn 47 of a long session is, in practice, lost: findable
+only by someone who already remembers enough to search for it. `decide` writes
+it to `DECISIONS.md` in the repo — dated, branch-tagged, append-only.
+
+In the repo rather than in the index on purpose. A decision is something the
+team should see in a diff and be able to argue with, not a private note on one
+machine. The index picks the file up like any other, so it is searchable too.
 
 ## Known limitation
 

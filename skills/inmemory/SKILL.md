@@ -24,6 +24,7 @@ Run them with Bash. `$P` below is `${CLAUDE_PLUGIN_ROOT}/hooks/recall.mjs`.
 | The exact words of a past decision | `node $P search <terms>` then `node $P show <id>` |
 | Repeated declarations before a refactor | `node $P duplicates` |
 | What is in flight across branches | `node $P standup` |
+| Why something was decided | `node $P decide --list [term]` |
 
 ## Cold start
 
@@ -50,6 +51,16 @@ from when they happened, and the repository has moved since.
 If the search returns nothing, say so. Do not fill the gap with a plausible
 reconstruction — a fabricated memory is worse than an admitted blank, because
 the user cannot tell the difference.
+
+## Recording decisions
+
+When a real alternative is rejected, or the obvious choice is deliberately not
+taken, record it: `node $P decide "chose X over Y because Z"`. Include the
+reason -- the choice alone is worthless in six months, the reason is the part
+nobody can reconstruct.
+
+Do not record every step. A DECISIONS.md full of trivia is as unread as an
+empty one. And do not polish the user's words into something they did not say.
 
 ## Reading the output honestly
 
