@@ -162,7 +162,12 @@ turns index in about 25 seconds and cost nothing.
 | `/lint` | instructions written for older models, and what your prompts cost per turn |
 
 All computed from the index. None of them run a model, so none of them cost
-tokens to produce — only the output you actually read.
+tokens to *produce* — only the output you actually read.
+
+They are not free to have, though. `claude plugin details inmemory` reports the
+real figure: **~607 tokens always-on** for the whole plugin — the four skills
+plus each command's description sitting in the prompt whether you use them or
+not. The hooks themselves cost nothing (they run outside the model).
 
 ## Decisions
 
@@ -267,6 +272,16 @@ that a login shell has and the hook shell does not. `node --version` from a
 plain terminal is the first check.
 
 ## Updating
+
+Claude can do it for you — the CLI exists, so asking it to update the plugin
+works:
+
+```
+claude plugin update inmemory@inmemory
+```
+
+Note the full `plugin@marketplace` id: plain `inmemory` returns "not found".
+A restart applies it.
 
 At most once a day, when a session starts, it checks GitHub for a newer release
 and adds one line if there is one. An HTTPS request and a string compare — no

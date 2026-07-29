@@ -83,6 +83,18 @@ back into `search`, not conclusions about the project.
 each turn, so the current session is covered; `map` is cached until
 `--refresh`. If a result looks stale, refresh before reasoning about it.
 
+## Updating it
+
+If the session-start notice says a newer version exists, you can apply it
+yourself — no need to hand it back to the user:
+
+```
+claude plugin update inmemory@inmemory
+```
+
+The full `plugin@marketplace` id is required; plain `inmemory` returns "not
+found". Tell the user a restart is needed for it to take effect.
+
 ## What this does not do
 
 It does not remember what was never written down. Reasoning that stayed in a
