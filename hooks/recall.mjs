@@ -573,9 +573,79 @@ function updateNotice() {
   });
 }
 
+// After a compaction the model has a summary of this session, not the session.
+// What it needs back is the thread it was just following -- and that is still
+// on disk, because compaction only rewrites context, never the transcript.
+//
+// The generic orientation is wrong here: previous sessions are not what was
+// just lost. This reads the current session's own transcript and hands back the
+// user's own words, in order.
+function compactRecap(payload) {
+  const sid = payload && payload.session_id;
+  const cwd = (payload && payload.cwd) || process.cwd();
+  if (!sid) return null;
+  const file = path.join(PROJECTS_DIR, resolveProject(cwd), `${sid}.jsonl`);
+
+  let lines;
+  try { lines = fs.readFileSync(file, "utf8").split("\n"); } catch { return null; }
+
+  const asks = [], files = [], cmds = [];
+  let dropped = 0;
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    let d;
+    try { d = JSON.parse(line); } catch { continue; }
+
+    if (d.type === "system" && d.subtype === "compact_boundary") {
+      dropped += (d.compactMetadata && d.compactMetadata.preTokens) || 0;
+      continue;
+    }
+    if (d.type === "user" && !d.isMeta) {
+      const t = userText((d.message || {}).content);
+      // Only what the person actually typed: a real turn, not a one-word
+      // acknowledgement and not a tool result.
+      if (t && t.length > 15 && !t.startsWith("<")) asks.push(t.split("\n")[0].slice(0, 180));
+    } else if (d.type === "assistant") {
+      for (const b of ((d.message || {}).content) || []) {
+        if (!b || b.type !== "tool_use") continue;
+        const inp = b.input || {};
+        if (inp.file_path && !files.includes(inp.file_path)) files.push(inp.file_path);
+        else if (inp.command) {
+          const c = String(inp.command).trim().split("\n")[0].slice(0, 60);
+          if (c && !cmds.includes(c)) cmds.push(c);
+        }
+      }
+    }
+  }
+  if (!asks.length) return null;
+
+  const out = ["<compacted_session_recall>"];
+  out.push(dropped
+    ? `This session was compacted (${dropped.toLocaleString()} tokens of context replaced by a summary).`
+    : "This session was compacted.");
+  out.push("What the user actually asked for, in their own words, in order:");
+  for (const a of asks.slice(-14)) out.push(`  ${a}`);
+  if (files.length) {
+    out.push(`Files touched: ${files.slice(-12).map((f) => path.basename(f)).join(", ")}`);
+  }
+  if (cmds.length) out.push(`Recent commands: ${cmds.slice(-4).join(" | ")}`);
+  out.push(`Full verbatim text of any earlier turn: node "${SELF}" search <terms>`);
+  out.push("</compacted_session_recall>");
+  return out.join("\n");
+}
+
 async function cmdSessionStart(payload) {
   const cwd = (payload && payload.cwd) || process.cwd();
   const project = resolveProject(cwd);
+
+  // Coming back from a compaction is a different situation from opening a
+  // project: the thread that was just summarised away is what is missing, not
+  // last week's work. Answer the actual gap.
+  if (payload && payload.source === "compact") {
+    const recap = compactRecap(payload);
+    if (recap) { console.log(recap); return; }
+  }
+
   let update = null;
   try { update = await updateNotice(); } catch { /* never block the session */ }
 

@@ -99,6 +99,7 @@ You never invoke anything. Five hooks do the work:
 | When | What arrives | Cost |
 |---|---|---|
 | You open a project | where it left off: recent sessions, files touched, decisions recorded | ~110 tokens |
+| **The context is compacted** | **your own words from this session, in order — the thread that was just summarised away** | **~700 tokens** |
 | You type a prompt | pointers into past turns that share uncommon words with it | ~200 tokens |
 | A file is opened or edited | earlier turns that discussed **that file** | ~150 tokens |
 | A skill is invoked | oversized ones are declined, with a pointer to the file worth reading | 0 |
@@ -107,6 +108,35 @@ You never invoke anything. Five hooks do the work:
 **Each one injects nothing when it has nothing worth saying.** A vague question
 costs zero. A file nobody has discussed costs zero. That is the difference
 between memory that helps and memory that is just a tax.
+
+## Compaction stops being a loss
+
+When the context fills, Claude Code replaces the conversation with a summary.
+One real compaction discarded 633,393 tokens. What survives is a paraphrase of
+what happened, which is where the thread goes.
+
+The transcript on disk is untouched — compaction rewrites context, never the
+record. So the moment it happens, this reads the session's own transcript and
+hands back what you actually asked for, in your words, in order:
+
+```
+<compacted_session_recall>
+This session was compacted (633,393 tokens of context replaced by a summary).
+What the user actually asked for, in their own words, in order:
+  ok pero para, yo no quiero que alguien tenga que andar tirando slashes...
+  si hablamos en porcentaje, cuanto pierde menos el hilo...
+  ...
+Files touched: recall.mjs, hooks.json, README.md
+</compacted_session_recall>
+```
+
+About 700 tokens to restore a thread that cost hundreds of thousands to lose.
+It is deliberately your words and not a second summary — a summary of a summary
+is how the detail disappears in the first place. Anything older is one `search`
+away, verbatim.
+
+A `PreCompact` hook also flushes the index first, so nothing that happened just
+before the boundary is missing afterwards.
 
 ## What it looks like
 
