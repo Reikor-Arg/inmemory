@@ -603,12 +603,42 @@ function justCompacted(payload) {
   return false;
 }
 
-function compactRecap(payload) {
+// The boundary line carrying preTokens is written at the same instant this hook
+// fires -- 3 ms apart in the first real compaction measured, and it had not
+// reached disk by the time the hook read the file, so the recap announced itself
+// without a figure. Re-read a few times rather than report nothing. Bounded at
+// 750 ms against a compaction that itself took 129 s, and it only ever waits
+// when the figure is genuinely still missing.
+async function compactRecap(payload) {
   const sid = payload && payload.session_id;
   const cwd = (payload && payload.cwd) || process.cwd();
   if (!sid) return null;
   const file = path.join(PROJECTS_DIR, resolveProject(cwd), `${sid}.jsonl`);
 
+  let scan = scanRecap(file);
+  for (let i = 0; scan && scan.asks.length && !scan.dropped && i < 5; i++) {
+    await new Promise((r) => setTimeout(r, 150));
+    scan = scanRecap(file);
+  }
+  if (!scan || !scan.asks.length) return null;
+  const { asks, files, cmds, dropped } = scan;
+
+  const out = ["<compacted_session_recall>"];
+  out.push(dropped
+    ? `This session was compacted (${dropped.toLocaleString()} tokens of context replaced by a summary).`
+    : "This session was compacted.");
+  out.push("What the user actually asked for, in their own words, in order:");
+  for (const a of asks.slice(-14)) out.push(`  ${a}`);
+  if (files.length) {
+    out.push(`Files touched: ${files.slice(-12).map((f) => path.basename(f)).join(", ")}`);
+  }
+  if (cmds.length) out.push(`Recent commands: ${cmds.slice(-4).join(" | ")}`);
+  out.push(`Full verbatim text of any earlier turn: node "${SELF}" search <terms>`);
+  out.push("</compacted_session_recall>");
+  return out.join("\n");
+}
+
+function scanRecap(file) {
   let lines;
   try { lines = fs.readFileSync(file, "utf8").split("\n"); } catch { return null; }
 
@@ -640,21 +670,7 @@ function compactRecap(payload) {
       }
     }
   }
-  if (!asks.length) return null;
-
-  const out = ["<compacted_session_recall>"];
-  out.push(dropped
-    ? `This session was compacted (${dropped.toLocaleString()} tokens of context replaced by a summary).`
-    : "This session was compacted.");
-  out.push("What the user actually asked for, in their own words, in order:");
-  for (const a of asks.slice(-14)) out.push(`  ${a}`);
-  if (files.length) {
-    out.push(`Files touched: ${files.slice(-12).map((f) => path.basename(f)).join(", ")}`);
-  }
-  if (cmds.length) out.push(`Recent commands: ${cmds.slice(-4).join(" | ")}`);
-  out.push(`Full verbatim text of any earlier turn: node "${SELF}" search <terms>`);
-  out.push("</compacted_session_recall>");
-  return out.join("\n");
+  return { asks, files, cmds, dropped };
 }
 
 async function cmdSessionStart(payload) {
@@ -665,14 +681,14 @@ async function cmdSessionStart(payload) {
   // project: the thread that was just summarised away is what is missing, not
   // last week's work. Answer the actual gap.
   //
-  // Two ways to notice, because one of them is an assumption. The payload field
-  // is believed to be `source`, matching the hook matcher's startup|resume|
-  // clear|compact -- but hook payloads are not written to transcripts, so it
-  // could not be verified. The transcript check does not care what the field is
-  // called: a compact_boundary written moments ago means a compaction just
-  // happened, and that is a fact on disk rather than a guess about an API.
+  // Two ways to notice. `source === "compact"` is the one that fires: confirmed
+  // on a real compaction, where the boundary had not yet reached disk, so the
+  // transcript check could not have been what triggered it. That check stays as
+  // the fallback -- it does not care what the payload field is called, since a
+  // compact_boundary written moments ago is a fact on disk rather than a guess
+  // about an API that may be renamed.
   if ((payload && payload.source === "compact") || justCompacted(payload)) {
-    const recap = compactRecap(payload);
+    const recap = await compactRecap(payload);
     if (recap) { console.log(recap); return; }
   }
 
