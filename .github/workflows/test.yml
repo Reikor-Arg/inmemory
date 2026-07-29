@@ -1,0 +1,94 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # The plugin was built and tested entirely on Windows. Everything that finds
+  # node on macOS and Linux -- which is every hook on those platforms, since they
+  # all go through run.sh -- had never executed outside a synthetic test. This
+  # job is the cheapest way to stop shipping that blind.
+  selftest:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: [20]
+        include:
+          # The README claims Node 14 and up. Claiming it is not testing it.
+          - os: ubuntu-latest
+            node: 14
+          - os: ubuntu-latest
+            node: 22
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: selftest
+        run: node hooks/recall.mjs --selftest
+
+      - name: skill gate selftest
+        run: node hooks/skill-gate.mjs --selftest
+
+      - name: launcher runs the script it is given
+        if: runner.os != 'Windows'
+        run: sh hooks/run.sh recall.mjs --selftest
+
+      - name: launcher fails open when node is unreachable
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          # No node on PATH, no version manager, no login shell that has one:
+          # the launcher must exit 0 and print nothing. A hook that cannot find
+          # node must never block a turn.
+          out=$(env -i HOME="$HOME" PATH=/nonexistent sh hooks/run.sh recall.mjs --selftest 2>&1) || {
+            echo "launcher exited non-zero without node: $?"; exit 1;
+          }
+          if [ -n "$out" ]; then echo "launcher was not silent: $out"; exit 1; fi
+          echo "fails open, silently"
+
+      - name: launcher has Unix line endings
+        if: runner.os != 'Windows'
+        run: |
+          # A CRLF run.sh cannot start on the platforms it exists for, and the
+          # error (/bin/sh^M) says nothing about the cause.
+          head -1 hooks/run.sh | grep -q $'\r' && { echo "run.sh has CRLF endings"; exit 1; }
+          echo "LF confirmed"
+
+      - name: hooks and manifests are valid JSON
+        run: |
+          node -e "JSON.parse(require('fs').readFileSync('hooks/hooks.json','utf8'))"
+          node -e "JSON.parse(require('fs').readFileSync('.claude-plugin/plugin.json','utf8'))"
+          node -e "JSON.parse(require('fs').readFileSync('.claude-plugin/marketplace.json','utf8'))"
+
+      - name: index and search a synthetic history end to end
+        shell: bash
+        run: |
+          # A selftest exercises functions. This exercises the thing a new user
+          # does first: an empty index, a backfill, then a query.
+          proj="$HOME/.claude/projects/ci--demo"
+          mkdir -p "$proj"
+          node -e "
+            const fs = require('fs');
+            const rows = [];
+            for (let i = 0; i < 3; i++) {
+              rows.push(JSON.stringify({ type: 'user', timestamp: new Date(Date.UTC(2026, 0, i + 1)).toISOString(),
+                message: { content: 'el parser de transcripts rompia con acentos en cp1252 numero ' + i } }));
+              rows.push(JSON.stringify({ type: 'assistant', timestamp: new Date(Date.UTC(2026, 0, i + 1)).toISOString(),
+                requestId: 'r' + i, message: { content: [{ type: 'text', text: 'respuesta ' + i }] } }));
+            }
+            fs.writeFileSync(process.argv[1] + '/aaaa1111-2222-3333-4444-555555555555.jsonl', rows.join('\n') + '\n');
+          " "$proj"
+          node hooks/recall.mjs index --all
+          node hooks/recall.mjs search --global parser transcripts | tee /tmp/hits.txt
+          grep -q "cp1252" /tmp/hits.txt || { echo "indexed but did not retrieve"; exit 1; }
+          # A query sharing nothing with the corpus must return nothing at all.
+          node hooks/recall.mjs search --global pizza helm > /tmp/none.txt 2>&1 || true
+          grep -q "cp1252" /tmp/none.txt && { echo "off-topic query retrieved a hit"; exit 1; }
+          echo "indexed, retrieved, and stayed quiet when it should"
