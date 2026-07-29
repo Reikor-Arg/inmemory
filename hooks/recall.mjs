@@ -580,6 +580,29 @@ function updateNotice() {
 // The generic orientation is wrong here: previous sessions are not what was
 // just lost. This reads the current session's own transcript and hands back the
 // user's own words, in order.
+// True when this session's transcript carries a compaction boundary written in
+// the last few minutes. Independent of any payload field, so it keeps working
+// if the hook contract is not what this code assumes.
+function justCompacted(payload) {
+  const sid = payload && payload.session_id;
+  const cwd = (payload && payload.cwd) || process.cwd();
+  if (!sid) return false;
+  const file = path.join(PROJECTS_DIR, resolveProject(cwd), `${sid}.jsonl`);
+  let text;
+  try { text = fs.readFileSync(file, "utf8"); } catch { return false; }
+  // Cheap pre-filter: the marker is rare, so most sessions never parse a line.
+  if (!text.includes("compact_boundary")) return false;
+  for (const line of text.split("\n").reverse()) {
+    if (!line.includes("compact_boundary")) continue;
+    let d;
+    try { d = JSON.parse(line); } catch { continue; }
+    if (d.type !== "system" || d.subtype !== "compact_boundary") continue;
+    const t = Date.parse(d.timestamp || "");
+    return Number.isFinite(t) && Date.now() - t < 5 * 60 * 1000;
+  }
+  return false;
+}
+
 function compactRecap(payload) {
   const sid = payload && payload.session_id;
   const cwd = (payload && payload.cwd) || process.cwd();
@@ -641,7 +664,14 @@ async function cmdSessionStart(payload) {
   // Coming back from a compaction is a different situation from opening a
   // project: the thread that was just summarised away is what is missing, not
   // last week's work. Answer the actual gap.
-  if (payload && payload.source === "compact") {
+  //
+  // Two ways to notice, because one of them is an assumption. The payload field
+  // is believed to be `source`, matching the hook matcher's startup|resume|
+  // clear|compact -- but hook payloads are not written to transcripts, so it
+  // could not be verified. The transcript check does not care what the field is
+  // called: a compact_boundary written moments ago means a compaction just
+  // happened, and that is a fact on disk rather than a guess about an API.
+  if ((payload && payload.source === "compact") || justCompacted(payload)) {
     const recap = compactRecap(payload);
     if (recap) { console.log(recap); return; }
   }
