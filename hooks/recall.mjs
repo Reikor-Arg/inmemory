@@ -1,9 +1,6 @@
 #!/usr/bin/env node
 // Recall: BM25 over Claude Code transcripts, injected under a hard budget.
 //
-// Port of recall.py. Same behaviour, same decisions (docs/adr/), verified by
-// comparing output against the Python implementation on the same corpus.
-//
 // Runs on any Node >= 14: no dependencies, and deliberately NOT node:sqlite,
 // which needs Node >= 22.5 and would drop every user on 18 or 20. The index is
 // a plain inverted index sharded by term prefix, so a lookup reads a handful of
