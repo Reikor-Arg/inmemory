@@ -1616,7 +1616,7 @@ function cmdLint() {
   console.log("flags phrasing, not intent -- read each one before changing it.");
 }
 
-function cmdDoctor() {
+async function cmdDoctor() {
   // Three levels, not two. A diagnostic that flags an expected state as a
   // failure teaches the reader to skim past all of it, including the line that
   // mattered.
@@ -1670,6 +1670,42 @@ function cmdDoctor() {
     check(behind === 0, "Index is up to date with every transcript",
           `${behind} transcript(s) have content not yet indexed. Run:  index --all`);
   }
+
+  // On macOS and Linux every hook is launched through run.sh, so a missing or
+  // unreadable one means the whole plugin is inert -- and inert here looks
+  // exactly like working and having nothing to say.
+  const launcher = path.join(HERE, "run.sh");
+  if (process.platform === "win32") {
+    note(true, "Windows: hooks call node directly (run.sh is for macOS and Linux)");
+  } else {
+    check(fs.existsSync(launcher), "Hook launcher present (hooks/run.sh)",
+          `hooks/run.sh is missing. Every hook is launched through it on this ` +
+          `platform, so nothing will run. Reinstall the plugin.`);
+    let firstLine = "";
+    try { firstLine = fs.readFileSync(launcher, "utf8").split("\n")[0]; } catch { /* reported above */ }
+    check(!firstLine.includes("\r"),
+          "Launcher has Unix line endings",
+          "hooks/run.sh has Windows line endings and cannot start on this platform " +
+          "(/bin/sh^M). Re-clone with .gitattributes honoured, or run: " +
+          `sed -i 's/\\r$//' ${launcher}`);
+  }
+
+  const rules = process.env.INMEMORY_RULES === "0" ? null : rulesText();
+  note(!!rules,
+       `Routing rules injected each session (~${Math.round((rules || "").length / CHARS_PER_TOKEN)} tokens)`,
+       "Routing rules are off (INMEMORY_RULES=0 or ground_rules.md missing) -- " +
+       "nothing tells the session to push cheap work to a cheaper model.");
+
+  const ollama = await ollamaLine();
+  note(!!ollama,
+       `Ollama detected -- text transforms can run locally for free`,
+       `No Ollama on ${process.env.OLLAMA_HOST || "127.0.0.1:11434"} -- not a problem, ` +
+       "the rules fall back to Haiku. Only worth starting if you already use it.");
+
+  note(process.env.INMEMORY_BLOCK_REREADS !== "0",
+       "Re-reading an unchanged file is declined",
+       "Re-read blocking is off (INMEMORY_BLOCK_REREADS=0) -- the same file can be " +
+       "paid for twice in one session.");
 
   const project = resolveProject(process.cwd());
   const here = fs.existsSync(path.join(PROJECTS_DIR, project));
@@ -1832,6 +1868,17 @@ async function selftest() {
   const real = rulesText();
   assert(real && real.length < 1200,
     `las reglas del repo pesan ${real ? real.length : 0} chars, demasiado para cada sesion`);
+
+  // Las dos versiones se editan a mano y se desincronizaron tres releases
+  // seguidas sin que nada avisara. `claude plugin validate` lo ve; el selftest
+  // corre siempre, y validate solo cuando alguien se acuerda.
+  const vp = path.join(HERE, "..", ".claude-plugin", "plugin.json");
+  const vm = path.join(HERE, "..", ".claude-plugin", "marketplace.json");
+  if (fs.existsSync(vp) && fs.existsSync(vm)) {
+    const a = readJson(vp, {}).version;
+    const b = ((readJson(vm, {}).plugins || [])[0] || {}).version;
+    assert(a && a === b, `plugin.json dice ${a} y marketplace.json dice ${b}`);
+  }
 
   console.log("OK: selftest passed");
 }

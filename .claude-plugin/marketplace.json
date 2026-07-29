@@ -4,13 +4,13 @@
     "name": "Reikor-Arg"
   },
   "metadata": {
-    "description": "Verbatim recall across Claude Code sessions, and a gate against oversized skills."
+    "description": "Verbatim recall across Claude Code sessions, a recap when the context is compacted, and gates against work that costs more than it should."
   },
   "plugins": [
     {
       "name": "inmemory",
-      "version": "2.8.1",
-      "description": "Gives Claude Code back the exact words from past sessions instead of a summary of them. Automatic: context arrives when you open a project, type a prompt, or touch a file, and nothing is injected when nothing matches. No dependencies, no API calls, nothing leaves your machine.",
+      "version": "2.10.1",
+      "description": "Gives Claude Code back the exact words from past sessions instead of a summary of them. When the context is compacted, hands back the thread that was just summarised away. Declines a re-read of a file that has not changed, and an oversized skill load. Automatic throughout, and silent when it has nothing worth saying. No dependencies, no API calls, nothing leaves your machine.",
       "source": "./",
       "category": "Productivity"
     }

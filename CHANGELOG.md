@@ -3,6 +3,19 @@
 Newest first. Every figure quoted here was measured on a real session, not
 estimated.
 
+## 2.10.1 — the install can now be checked
+
+`marketplace.json` had been stuck at 2.8.1 for three releases. plugin.json wins
+at install time so nothing was broken, but anyone reading the listing saw the
+wrong version. The selftest now compares the two, because it runs on every
+change and `claude plugin validate` only runs when someone remembers.
+
+`doctor` had fallen behind the feature set — it could report a healthy install
+while the launcher every macOS and Linux hook depends on was missing. It now
+checks that hooks/run.sh exists and has Unix line endings, and reports whether
+the routing rules are being injected and at what cost, whether Ollama was found,
+and whether re-read blocking is on.
+
 ## 2.10.0 — the routing rules actually reach a session
 
 `ground_rules.md` shipped in every release and was **reachable only by running a
