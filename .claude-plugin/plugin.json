@@ -1,0 +1,8 @@
+{
+  "name": "inmemory",
+  "version": "1.0.0",
+  "description": "Verbatim recall across Claude Code sessions, plus a gate that stops oversized skills from flooding the prompt. Pure Node, no dependencies, no API calls.",
+  "keywords": ["memory", "recall", "context", "tokens", "bm25"],
+  "hooks": "./hooks/hooks.json",
+  "commands": "./commands"
+}

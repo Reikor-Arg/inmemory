@@ -1,0 +1,5 @@
+# The index is built from your own transcripts. It must never be committed.
+recall/
+*.jsonl
+node_modules/
+__pycache__/

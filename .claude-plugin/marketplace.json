@@ -1,0 +1,18 @@
+{
+  "name": "inmemory",
+  "owner": {
+    "name": "Reikor-Arg"
+  },
+  "metadata": {
+    "description": "Verbatim recall across Claude Code sessions, and a gate against oversized skills."
+  },
+  "plugins": [
+    {
+      "name": "inmemory",
+      "version": "1.0.0",
+      "description": "Gives Claude back the exact words from past sessions instead of a summary of them, and stops one oversized skill from costing you most of a session. Pure Node, no dependencies, nothing leaves your machine.",
+      "source": "./",
+      "category": "Productivity"
+    }
+  ]
+}
