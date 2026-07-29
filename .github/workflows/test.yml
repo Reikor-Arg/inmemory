@@ -18,9 +18,11 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         node: [20]
         include:
-          # The README claims Node 14 and up. Claiming it is not testing it.
+          # The README claimed Node 14 and up until this workflow ran it: the
+          # index builder uses `||=`, which is Node 15. Claiming a floor is not
+          # testing one. 18 is the floor now, and these two are the edges of it.
           - os: ubuntu-latest
-            node: 14
+            node: 18
           - os: ubuntu-latest
             node: 22
     runs-on: ${{ matrix.os }}
@@ -40,18 +42,21 @@ jobs:
         if: runner.os != 'Windows'
         run: sh hooks/run.sh recall.mjs --selftest
 
-      - name: launcher fails open when node is unreachable
+      - name: launcher fails open
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          # No node on PATH, no version manager, no login shell that has one:
-          # the launcher must exit 0 and print nothing. A hook that cannot find
-          # node must never block a turn.
-          out=$(env -i HOME="$HOME" PATH=/nonexistent sh hooks/run.sh recall.mjs --selftest 2>&1) || {
-            echo "launcher exited non-zero without node: $?"; exit 1;
-          }
-          if [ -n "$out" ]; then echo "launcher was not silent: $out"; exit 1; fi
-          echo "fails open, silently"
+          # A hook that cannot do its job must still exit 0. Called with no
+          # script at all, and called in an environment with no node reachable
+          # through PATH -- note /bin/sh by absolute path, because an earlier
+          # version of this check wrote `sh` and measured bash failing to find
+          # `sh` on the stripped PATH, not the launcher.
+          /bin/sh hooks/run.sh || { echo "no-args did not exit 0"; exit 1; }
+          [ -z "$(/bin/sh hooks/run.sh 2>&1)" ] || { echo "no-args was not silent"; exit 1; }
+
+          env -i HOME=/nonexistent-home PATH=/nonexistent /bin/sh hooks/run.sh recall.mjs --selftest \
+            || { echo "launcher exited non-zero with no node reachable"; exit 1; }
+          echo "fails open"
 
       - name: launcher has Unix line endings
         if: runner.os != 'Windows'

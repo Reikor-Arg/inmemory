@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Recall: BM25 over Claude Code transcripts, injected under a hard budget.
 //
-// Runs on any Node >= 14: no dependencies, and deliberately NOT node:sqlite,
+// Runs on any Node >= 18: no dependencies, and deliberately NOT node:sqlite,
 // which needs Node >= 22.5 and would drop every user on 18 or 20. The index is
 // a plain inverted index sharded by term prefix, so a lookup reads a handful of
 // small files instead of loading the whole corpus per prompt.
@@ -1625,8 +1625,8 @@ async function cmdDoctor() {
   const note = (cond, good, msg) => (cond ? ok : info).push(cond ? good : msg);
 
   const major = Number((process.versions.node || "0").split(".")[0]);
-  check(major >= 14, `Node ${process.versions.node}`,
-        `Node ${process.versions.node} is too old -- needs 14 or newer.`);
+  check(major >= 18, `Node ${process.versions.node}`,
+        `Node ${process.versions.node} is too old -- needs 18 or newer.`);
 
   const meta = readJson(META, null);
   const docs = meta ? meta.docs || 0 : 0;

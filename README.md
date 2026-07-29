@@ -1,5 +1,7 @@
 # inmemory
 
+[![test](https://github.com/Reikor-Arg/inmemory/actions/workflows/test.yml/badge.svg)](https://github.com/Reikor-Arg/inmemory/actions/workflows/test.yml)
+
 Claude Code forgets your project between sessions. Within a long one, it forgets
 the details every time the context is compacted.
 
@@ -17,7 +19,7 @@ your machine.**
 
 ## Install
 
-**1. Check you have Node** (any version from 14 on):
+**1. Check you have Node** (18 or newer):
 
 ```
 node --version
