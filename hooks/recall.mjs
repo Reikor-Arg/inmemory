@@ -16,6 +16,7 @@ import path from "node:path";
 import os from "node:os";
 import readline from "node:readline";
 import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 
 // Absolute path to this file, so messages we print can be pasted and run from
 // anywhere. The plugin is installed under a cache directory the user never
@@ -828,6 +829,152 @@ function cmdMap(args) {
 Stale? Re-run with --refresh. Find one thing: map <name>`);
 }
 
+// ------------------------------------------------------------- duplication
+
+// Names so common that repetition carries no information: every module has a
+// main, a handler, a setup. Reporting them buries the ones that matter.
+const UBIQUITOUS = new Set(["main", "init", "setup", "run", "start", "stop",
+  "test", "handler", "handle", "index", "get", "set", "load", "save", "parse",
+  "render", "update", "create", "delete", "list", "config", "build", "close",
+  "read", "write", "check", "format", "toString", "constructor", "__init__",
+  // Framework conventions: repeated because the framework says so, not because
+  // anyone duplicated a concern. Django migrations alone put "Migration" in 74
+  // files of one real repo, burying every finding worth reading.
+  "Migration", "setUp", "tearDown", "setUpClass", "Meta", "forwards", "backwards",
+  "beforeEach", "afterEach", "describe", "ready", "apps", "urlpatterns"]);
+
+// Generated or convention-bound trees. Repetition inside them says nothing
+// about the design of the code someone actually wrote.
+const BORING_PATHS = /(^|\/)(migrations|tests?|__tests__|spec|fixtures|vendor|third_party|generated)(\/|$)/i;
+
+function cmdDuplicates(args) {
+  // The objective half of an architecture review: the same name declared in
+  // several files is a fact, not a judgement. Whether those files *should* be
+  // unified is a judgement, and this deliberately does not make it -- that is
+  // the part that needs a model, and it is the part a heuristic gets wrong.
+  const project = resolveProject(process.cwd());
+  const file = mapPath(project);
+  let data = readJson(file, null);
+  if (!data || args.includes("--refresh")) {
+    ensureRoot();
+    data = { root: process.cwd(), scannedAt: new Date().toISOString(), files: scanRepo(process.cwd()) };
+    writeJson(file, data);
+  }
+  const files = data.files || [];
+  if (!files.length) { console.log("No source files found. Run: map --refresh"); return; }
+
+  const bySymbol = new Map();
+  for (const f of files) {
+    for (const s of f.symbols) {
+      if (s.length < 5 || UBIQUITOUS.has(s)) continue;
+      if (!bySymbol.has(s)) bySymbol.set(s, []);
+      bySymbol.get(s).push(f.path);
+    }
+  }
+  const repeated = [...bySymbol.entries()]
+    .map(([s, paths]) => [s, [...new Set(paths)]])
+    .filter(([, paths]) => paths.length > 1)
+    .sort((a, b) => b[1].length - a[1].length);
+
+  const byBase = new Map();
+  for (const f of files) {
+    const base = f.path.split("/").pop();
+    if (/^(index|README|__init__)\./i.test(base)) continue;
+    if (!byBase.has(base)) byBase.set(base, []);
+    byBase.get(base).push(f.path);
+  }
+  const sameName = [...byBase.entries()]
+    .filter(([, paths]) => paths.length > 1)
+    .sort((a, b) => b[1].length - a[1].length);
+
+  if (!repeated.length && !sameName.length) {
+    console.log("No repeated declarations or filenames found.");
+    return;
+  }
+  if (repeated.length) {
+    console.log(`Declarations defined in more than one file (${repeated.length}):\n`);
+    for (const [sym, paths] of repeated.slice(0, 25)) {
+      console.log(`  ${sym}  (${paths.length})`);
+      for (const p of paths.slice(0, 6)) console.log(`      ${p}`);
+    }
+  }
+  if (sameName.length) {
+    console.log(`\nFilenames used in more than one directory (${sameName.length}):\n`);
+    for (const [base, paths] of sameName.slice(0, 15)) {
+      console.log(`  ${base}  (${paths.length})`);
+      for (const p of paths.slice(0, 5)) console.log(`      ${p}`);
+    }
+  }
+  console.log(`\nRepetition is not automatically a problem -- an interface implemented`);
+  console.log(`several times looks identical to a concern copy-pasted. Read before merging.`);
+}
+
+// ------------------------------------------------------------------ standup
+
+function git(args, cwd) {
+  // Synchronous and dependency-free: spawnSync is in every Node, and shelling
+  // out to git beats reimplementing ref parsing. The import is static because
+  // ESM has no require() -- a lazy require() here throws at call time, gets
+  // swallowed by the catch below, and reports "not a git repository" for a
+  // repository that is perfectly fine.
+  try {
+    const r = spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true });
+    return r.status === 0 ? r.stdout.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+function cmdStandup(args) {
+  const cwd = process.cwd();
+  if (git(["rev-parse", "--is-inside-work-tree"], cwd) !== "true") {
+    console.log("Not a git repository.");
+    return;
+  }
+  const days = Number((args.find((a) => /^--days=\d+$/.test(a)) || "--days=14").split("=")[1]);
+  const current = git(["rev-parse", "--abbrev-ref", "HEAD"], cwd) || "?";
+  const base = ["main", "master", "develop"].find(
+    (b) => git(["rev-parse", "--verify", "--quiet", b], cwd)) || null;
+
+  console.log(`${cwd}\non ${current}${base ? `, comparing against ${base}` : ""}\n`);
+
+  const dirty = git(["status", "--porcelain"], cwd);
+  if (dirty) {
+    const lines = dirty.split("\n").filter(Boolean);
+    console.log(`## Uncommitted (${lines.length} file(s))`);
+    for (const l of lines.slice(0, 12)) console.log(`  ${l}`);
+    if (lines.length > 12) console.log(`  ... ${lines.length - 12} more`);
+    console.log("");
+  }
+
+  const raw = git(["for-each-ref", "--sort=-committerdate", "refs/heads/",
+    "--format=%(refname:short)\t%(committerdate:relative)\t%(committerdate:unix)\t%(subject)"], cwd);
+  const branches = (raw || "").split("\n").filter(Boolean).map((l) => l.split("\t"));
+  const cutoff = Date.now() / 1000 - days * 86400;
+  const recent = branches.filter(([, , unix]) => Number(unix) >= cutoff);
+
+  console.log(`## Branches active in the last ${days} days (${recent.length} of ${branches.length})`);
+  for (const [name, rel, , subject] of recent.slice(0, 15)) {
+    let gap = "";
+    if (base && name !== base) {
+      const counts = git(["rev-list", "--left-right", "--count", `${base}...${name}`], cwd);
+      if (counts) {
+        const [behind, ahead] = counts.split(/\s+/);
+        gap = `  [+${ahead} / -${behind}]`;
+      }
+    }
+    console.log(`  ${name}${gap}`);
+    console.log(`      ${rel} -- ${(subject || "").slice(0, 80)}`);
+  }
+
+  const wt = git(["worktree", "list"], cwd);
+  if (wt && wt.split("\n").length > 1) {
+    console.log(`\n## Worktrees`);
+    for (const l of wt.split("\n")) console.log(`  ${l}`);
+  }
+  console.log(`\n(+ahead / -behind relative to ${base || "the default branch"}. Nothing here was inferred.)`);
+}
+
 function cmdRules() {
   // Next to this file, or one level up: the plugin layout puts hooks/ under
   // the plugin root while ground_rules.md sits at the root, and a standalone
@@ -932,9 +1079,11 @@ async function main() {
   if (cmd === "digest") return cmdDigest(args);
   if (cmd === "topics") return cmdTopics(args);
   if (cmd === "map") return cmdMap(args);
+  if (cmd === "duplicates") return cmdDuplicates(args);
+  if (cmd === "standup") return cmdStandup(args);
   if (cmd === "rules") return cmdRules();
   if (cmd === "stats") return cmdStats();
-  console.log("usage: recall.mjs [index|inject|search|show|sessions|timeline|digest|topics|map|rules|stats|--selftest]");
+  console.log("usage: recall.mjs [index|inject|search|show|sessions|timeline|digest|topics|map|duplicates|standup|rules|stats|--selftest]");
 }
 
 function readStdin() {

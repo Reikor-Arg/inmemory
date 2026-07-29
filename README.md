@@ -55,6 +55,8 @@ being the automatic one.
 | `/digest [YYYY-Www]` | what was asked in a week, verbatim, plus files and commands |
 | `/topics` | terms frequent here and rare elsewhere: what this project is about |
 | `/map [name]` | the repo's layout and declarations, or which file declares `name` |
+| `/duplicates` | the same name declared in several files; filenames reused across directories |
+| `/standup` | uncommitted work, branches active recently, how far each is from the default |
 
 `timeline` and `digest` are the trace: what you worked on, when, in your own
 words. They are computed from the index, so they cost **no tokens to produce** —
@@ -67,6 +69,8 @@ node <plugin>/hooks/recall.mjs timeline [--global] [--limit=N]
 node <plugin>/hooks/recall.mjs digest [--global] [YYYY-Www]
 node <plugin>/hooks/recall.mjs topics [--top=N]
 node <plugin>/hooks/recall.mjs map [--refresh] [name]
+node <plugin>/hooks/recall.mjs duplicates [--refresh]
+node <plugin>/hooks/recall.mjs standup [--days=N]
 node <plugin>/hooks/recall.mjs sessions [--global] [filter]   # one line per session
 node <plugin>/hooks/recall.mjs show <id>                      # verbatim text of a pointer
 node <plugin>/hooks/recall.mjs index --all                    # backfill every project (~25 s)
