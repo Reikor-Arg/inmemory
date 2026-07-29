@@ -159,6 +159,7 @@ turns index in about 25 seconds and cost nothing.
 | `/decide <what and why>` | record a decision so the reason outlives the session |
 | `/how-it-works` | what the plugin does, what it costs, what it cannot do |
 | `/doctor` | check the install and report anything wrong |
+| `/lint` | instructions written for older models, and what your prompts cost per turn |
 
 All computed from the index. None of them run a model, so none of them cost
 tokens to produce — only the output you actually read.

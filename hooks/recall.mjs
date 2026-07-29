@@ -1135,6 +1135,112 @@ function cmdRules() {
 // Turns "it does not work" into a list of specific things that are or are not
 // true. Every check says what to do about a failure -- a diagnostic that only
 // reports a problem leaves the user exactly where they started.
+// ------------------------------------------------------------------- lint
+
+// Patterns written to overcome older models' reluctance. Current models follow
+// the system prompt closely, so these now overtrigger -- the tool fires when it
+// should not, the caveat appears when nobody asked. Anthropic's own migration
+// notes give the replacements: "CRITICAL: You MUST use this tool when..."
+// becomes "Use this tool when...", and "If in doubt, use X" is simply deleted.
+const LINT_RULES = [
+  [/\b(CRITICAL|MANDATORY|ABSOLUTELY|UNDER NO CIRCUMSTANCES)\b/g,
+   "Written to force compliance. Current models already comply; the emphasis makes them overtrigger."],
+  [/\bYOU MUST\b|\bALWAYS MUST\b/g,
+   "Drop to a plain instruction: 'Use X when...' rather than 'YOU MUST use X'."],
+  [/\bif in doubt\b[^.\n]*/gi,
+   "Delete. This existed to push past reluctance that current models no longer have."],
+  [/\bdefault to (using|calling|invoking)\b[^.\n]*/gi,
+   "Name the condition instead: 'Use X when <situation>'."],
+  [/\bNEVER\b(?![^\n]{0,40}(secret|password|key|token|credential))/g,
+   "A blanket NEVER outside a safety rule usually overshoots. State the case it actually covers."],
+  // Three or more capitalised words in a row: an actual shouted sentence.
+  // Matching single words flagged CLAUDE, CONTEXT and ROUTING -- headings and
+  // product names, not emphasis. A rule that mostly fires on false positives
+  // gets ignored along with the ones that were right.
+  // Spaces only: hyphenated capitals are identifiers (DESIGN-IT-TWICE), not
+  // emphasis.
+  [/\b[A-Z]{4,}(?: [A-Z]{2,}){2,}\b/g,
+   "A shouted phrase. Current models weigh a plain sentence the same and it costs fewer tokens."],
+];
+
+function lintFile(file) {
+  let text;
+  try { text = fs.readFileSync(file, "utf8"); } catch { return null; }
+  const findings = [];
+  for (const [re, advice] of LINT_RULES) {
+    re.lastIndex = 0;
+    const seen = new Set();
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      const hit = m[0].trim().slice(0, 60);
+      if (seen.has(hit.toLowerCase())) continue;
+      seen.add(hit.toLowerCase());
+      const line = text.slice(0, m.index).split("\n").length;
+      findings.push({ line, hit, advice });
+      if (seen.size >= 4) break; // one example per pattern is enough to act on
+    }
+  }
+  return { file, bytes: text.length, tokens: Math.round(text.length / CHARS_PER_TOKEN), findings };
+}
+
+function cmdLint() {
+  const targets = [
+    path.join(process.cwd(), "CLAUDE.md"),
+    path.join(HOME, ".claude", "CLAUDE.md"),
+    path.join(process.cwd(), ".claude", "CLAUDE.md"),
+  ];
+  try {
+    const dir = path.join(HOME, ".claude", "skills");
+    for (const d of fs.readdirSync(dir)) targets.push(path.join(dir, d, "SKILL.md"));
+  } catch { /* no user skills */ }
+
+  const reports = targets.map(lintFile).filter(Boolean);
+  if (!reports.length) { console.log("No CLAUDE.md or skills found to check."); return; }
+
+  // The distinction matters more than the numbers. A CLAUDE.md is in the prompt
+  // on every turn forever; a skill's *body* is only loaded when it is invoked,
+  // and only its description sits in the prefix. Reporting them together would
+  // suggest a 20,000-token skill costs 20,000 tokens a turn. It costs about 90.
+  const always = reports.filter((r) => /CLAUDE\.md$/i.test(r.file));
+  const onDemand = reports.filter((r) => /SKILL\.md$/i.test(r.file));
+
+  if (always.length) {
+    console.log("Loaded on EVERY turn of every session:\n");
+    for (const r of always.sort((a, b) => b.tokens - a.tokens)) {
+      console.log(`  ~${String(r.tokens).padStart(5)} tok  ${r.file}`);
+    }
+    const t = always.reduce((n, r) => n + r.tokens, 0);
+    console.log(`\n  ~${t} tokens per turn. This is the one that compounds.\n`);
+  }
+
+  if (onDemand.length) {
+    const heavy = onDemand.sort((a, b) => b.tokens - a.tokens).slice(0, 8);
+    console.log("Loaded only WHEN INVOKED (heaviest skills):\n");
+    for (const r of heavy) {
+      console.log(`  ~${String(r.tokens).padStart(5)} tok  ${path.basename(path.dirname(r.file))}`);
+    }
+    console.log(`\n  ${onDemand.length} skills. In the prefix each costs only its`);
+    console.log("  description (~70-100 tok); the size above is paid on invocation.\n");
+  }
+
+  const withFindings = reports.filter((r) => r.findings.length);
+  if (!withFindings.length) {
+    console.log("No patterns found that current models no longer need.");
+    return;
+  }
+  console.log("Phrasing written for older models -- these now overtrigger:\n");
+  for (const r of withFindings) {
+    console.log(`${r.file}`);
+    for (const f of r.findings.slice(0, 6)) {
+      console.log(`  line ${f.line}: "${f.hit}"`);
+      console.log(`      ${f.advice}`);
+    }
+    console.log("");
+  }
+  console.log("Judgement required: a rule that genuinely is critical stays. This");
+  console.log("flags phrasing, not intent -- read each one before changing it.");
+}
+
 function cmdDoctor() {
   // Three levels, not two. A diagnostic that flags an expected state as a
   // failure teaches the reader to skim past all of it, including the line that
@@ -1298,9 +1404,10 @@ async function main() {
   if (cmd === "standup") return cmdStandup(args);
   if (cmd === "decide") return cmdDecide(args);
   if (cmd === "rules") return cmdRules();
+  if (cmd === "lint") return cmdLint();
   if (cmd === "doctor") return cmdDoctor();
   if (cmd === "stats") return cmdStats();
-  console.log("usage: recall.mjs [index|inject|search|show|sessions|timeline|digest|topics|map|duplicates|standup|decide|doctor|rules|stats|--selftest]");
+  console.log("usage: recall.mjs [index|inject|search|show|sessions|timeline|digest|topics|map|duplicates|standup|decide|doctor|lint|rules|stats|--selftest]");
 }
 
 function readStdin() {
