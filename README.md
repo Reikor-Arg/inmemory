@@ -361,6 +361,15 @@ session. Nothing is sent anywhere, ever.
 
 ## When something breaks
 
+[Open an issue.](https://github.com/Reikor-Arg/inmemory/issues) The form asks for
+`/doctor` output first, because almost every problem is one of two things — node
+is not visible to the hook, or the index is empty — and that one command tells
+them apart.
+
+Reports from macOS and Linux are the most useful ones: the plugin was built and
+tested on Windows, and the code that finds node on those platforms has never run
+outside a test.
+
 Every hook fails open. A broken index, an unreadable file, a malformed payload:
 the turn proceeds exactly as if the plugin were not installed. It can lose the
 ability to help. It cannot block your work.

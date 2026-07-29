@@ -1,0 +1,46 @@
+name: Something is not working
+description: A hook that does not run, an injection that never arrives, a command that errors
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Almost every problem here is one of two things: node is not visible to the
+        hook, or the index is empty. `/doctor` distinguishes them in one line, so
+        it is asked for first — please paste it even if it says everything is OK.
+
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of /doctor
+      description: Or `node <plugin>/hooks/recall.mjs doctor` if the command is not available.
+      render: text
+    validations:
+      required: true
+
+  - type: input
+    id: platform
+    attributes:
+      label: OS and node version
+      description: The output of `node --version`, and macOS / Linux / Windows.
+      placeholder: macOS 15.1, node v20.11.0 (from nvm)
+    validations:
+      required: true
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: |
+        What you expected and what you got instead. If the plugin is simply silent,
+        say so — silence is often correct behaviour (nothing matched) and often not,
+        and the difference is worth reporting.
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        **If node came from a version manager** (nvm, fnm, volta, asdf) on macOS or
+        Linux, mention which one. Hooks do not run in a login shell, so that is the
+        most likely place for this to break, and the least tested.
