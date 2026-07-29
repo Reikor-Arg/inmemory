@@ -3,6 +3,22 @@
 Newest first. Every figure quoted here was measured on a real session, not
 estimated.
 
+## 2.10.2 — tested on macOS and Linux for the first time
+
+A workflow now runs the selftests on Ubuntu 18/20/22, macOS and Windows. It
+found two defects that had shipped in every release, neither visible by reading
+the code:
+
+- **Node 14 was never supported.** The README claimed it since 1.0.0; the index
+  builder uses , which is Node 15. The floor is 18 now, and it is tested
+  rather than asserted.
+- **run.sh depended on PATH to cope with a broken PATH.** It took its own
+  directory from , an external binary resolved through PATH — so in the
+  exact degraded environment the launcher exists to survive, it handed node a
+  path that could not exist. Parameter expansion now; nothing in it touches PATH.
+
+Until this release the plugin was, in practice, broken on macOS and Linux.
+
 ## 2.10.1 — the install can now be checked
 
 `marketplace.json` had been stuck at 2.8.1 for three releases. plugin.json wins
