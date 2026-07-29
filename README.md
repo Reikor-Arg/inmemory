@@ -48,13 +48,24 @@ being the automatic one.
 
 ## Commands
 
-`/recall <query>` searches this project's history by hand; add `--global` to
-search every project.
+| Command | What it gives you |
+|---|---|
+| `/recall <query>` | verbatim excerpts matching a query (`--global` for every project) |
+| `/timeline` | every session, newest first, grouped by ISO week |
+| `/digest [YYYY-Www]` | what was asked in a week, verbatim, plus files and commands |
+| `/topics` | terms frequent here and rare elsewhere: what this project is about |
 
-The rest is run directly, from anywhere:
+`timeline` and `digest` are the trace: what you worked on, when, in your own
+words. They are computed from the index, so they cost **no tokens to produce** —
+unlike a memory plugin that runs a model in the background to write summaries.
+
+The same things run directly, from anywhere:
 
 ```
-node <plugin>/hooks/recall.mjs sessions [--global] [filter]   # what each session was about
+node <plugin>/hooks/recall.mjs timeline [--global] [--limit=N]
+node <plugin>/hooks/recall.mjs digest [--global] [YYYY-Www]
+node <plugin>/hooks/recall.mjs topics [--top=N]
+node <plugin>/hooks/recall.mjs sessions [--global] [filter]   # one line per session
 node <plugin>/hooks/recall.mjs show <id>                      # verbatim text of a pointer
 node <plugin>/hooks/recall.mjs index --all                    # backfill every project (~25 s)
 node <plugin>/hooks/recall.mjs stats
@@ -72,6 +83,13 @@ those words were actually said.
 
 It also costs nothing to write. No second model runs in the background to
 produce observations; indexing is plain string work.
+
+## What it deliberately does not do
+
+No background model runs. Reports are computed from the index and handed to
+Claude as raw material; Claude writes the narrative when you ask for one, and
+only then. Nothing is generated while you are not looking, so nothing is
+generated wrong while you are not looking either.
 
 ## Known limitation
 

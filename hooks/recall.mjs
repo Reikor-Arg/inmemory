@@ -502,14 +502,14 @@ function cmdSearch(args) {
 
 const TOOL_RE = /^\[(\w+)\] (\{.*)$/gm;
 
-function cmdSessions(args) {
-  // Derived, never stored: a digest is a scan, so it cannot drift out of sync
-  // with the transcript and costs no disk. Nothing is generated either -- the
-  // ask is the user's own first line, files and commands come out of the tool
-  // inputs (ADR 0001 applies to summaries too).
-  const global = args.includes("--global");
-  const needle = args.filter((a) => a !== "--global").join(" ").trim().toLowerCase();
-  const project = global ? null : resolveProject(process.cwd());
+// One scan of the corpus, shared by every reporting command below.
+//
+// Everything here is derived, never stored: a report is a scan, so it cannot
+// drift out of sync with the transcript and costs no disk. Nothing is generated
+// either -- the ask is the user's own first line, files and commands come out
+// of the tool inputs. ADR 0001 applies to reports too: no model writes any of
+// this, so none of it can be wrong in a way the transcript would contradict.
+export function scanSessions(project) {
   let lines;
   try { lines = fs.readFileSync(CHUNKS, "utf8").split("\n"); } catch { lines = []; }
 
@@ -523,10 +523,14 @@ function cmdSessions(args) {
     if (!bySession.has(key)) {
       bySession.set(key, { project: rec.project, session: rec.session, ts: rec.ts,
                            turns: 0, ask: firstLine(rec.text).slice(0, 160),
-                           files: [], cmds: [] });
+                           asks: [], files: [], cmds: [] });
     }
     const d = bySession.get(key);
     d.turns++;
+    if (d.asks.length < 40) {
+      const head = firstLine(rec.text).slice(0, 200);
+      if (head && !d.asks.includes(head)) d.asks.push(head);
+    }
     TOOL_RE.lastIndex = 0;
     let m;
     while ((m = TOOL_RE.exec(rec.text)) !== null) {
@@ -534,25 +538,170 @@ function cmdSessions(args) {
       try { input = JSON.parse(m[2].replace(/[.\s]+$/, "")); } catch { continue; }
       if (["Edit", "Write", "Read", "NotebookEdit"].includes(m[1])) {
         const p = input.file_path;
-        if (p && !d.files.includes(p) && d.files.length < 8) d.files.push(p);
+        if (p && !d.files.includes(p) && d.files.length < 40) d.files.push(p);
       } else if (["Bash", "PowerShell"].includes(m[1])) {
         const c = (input.command || "").trim().split("\n")[0];
-        if (c && !d.cmds.includes(c) && d.cmds.length < 6) d.cmds.push(c.slice(0, 70));
+        if (c && !d.cmds.includes(c) && d.cmds.length < 40) d.cmds.push(c.slice(0, 70));
       }
     }
   }
+  return [...bySession.values()].sort((a, b) => String(b.ts).localeCompare(String(a.ts)));
+}
 
-  const out = [...bySession.values()]
+const scopeOf = (args) =>
+  args.includes("--global") ? null : resolveProject(process.cwd());
+const restOf = (args) => args.filter((a) => !a.startsWith("--")).join(" ").trim().toLowerCase();
+
+function cmdSessions(args) {
+  const project = scopeOf(args);
+  const needle = restOf(args);
+  const out = scanSessions(project)
     .filter((d) => !needle || JSON.stringify(d).toLowerCase().includes(needle))
-    .sort((a, b) => String(b.ts).localeCompare(String(a.ts)))
     .slice(0, 15);
-  if (!out.length) { console.log("Sin sesiones que coincidan."); return; }
+  if (!out.length) { console.log("No matching sessions."); return; }
   for (const d of out) {
-    console.log(`\n=== ${(d.ts || "").slice(0, 16)} | sesion ${d.session.slice(0, 8)} | ${d.turns} turnos${project ? "" : " | " + d.project}`);
-    console.log(`    pidio: ${d.ask}`);
-    if (d.files.length) console.log(`    archivos: ${d.files.map((f) => path.basename(f)).join(", ")}`);
-    if (d.cmds.length) console.log(`    comandos: ${d.cmds.slice(0, 3).join(" | ")}`);
+    console.log(`\n=== ${(d.ts || "").slice(0, 16)} | session ${d.session.slice(0, 8)} | ${d.turns} turns${project ? "" : " | " + d.project}`);
+    console.log(`    asked: ${d.ask}`);
+    if (d.files.length) console.log(`    files: ${d.files.slice(0, 8).map((f) => path.basename(f)).join(", ")}`);
+    if (d.cmds.length) console.log(`    commands: ${d.cmds.slice(0, 3).join(" | ")}`);
   }
+}
+
+// ISO week, so digests line up with how people actually talk about "last week".
+function isoWeek(ts) {
+  const d = new Date(ts);
+  if (isNaN(d)) return "unknown";
+  const t = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7)); // Thursday decides the year
+  const start = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((t - start) / 86400000 + 1) / 7);
+  return `${t.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+
+function cmdTimeline(args) {
+  const project = scopeOf(args);
+  const limitArg = args.find((a) => /^--limit=\d+$/.test(a));
+  const max = limitArg ? Number(limitArg.split("=")[1]) : 40;
+  const sessions = scanSessions(project);
+  if (!sessions.length) { console.log("Nothing indexed yet. Run: index --all"); return; }
+
+  const byWeek = new Map();
+  for (const s of sessions) {
+    const w = isoWeek(s.ts);
+    if (!byWeek.has(w)) byWeek.set(w, []);
+    byWeek.get(w).push(s);
+  }
+  let shown = 0;
+  for (const [week, group] of byWeek) {
+    if (shown >= max) break;
+    const turns = group.reduce((n, s) => n + s.turns, 0);
+    const files = new Set(group.flatMap((s) => s.files.map((f) => path.basename(f))));
+    console.log(`\n## ${week}  --  ${group.length} session(s), ${turns} turns, ${files.size} file(s) touched`);
+    for (const s of group) {
+      if (shown++ >= max) break;
+      console.log(`  ${(s.ts || "").slice(0, 10)} | ${s.session.slice(0, 8)} | ${s.ask.slice(0, 110)}`);
+    }
+  }
+  console.log(`\n(${sessions.length} sessions total${project ? " in this project" : " across all projects"})`);
+}
+
+function cmdDigest(args) {
+  const project = scopeOf(args);
+  const want = args.find((a) => /^\d{4}-W\d{2}$/i.test(a));
+  const sessions = scanSessions(project);
+  if (!sessions.length) { console.log("Nothing indexed yet. Run: index --all"); return; }
+
+  const week = want ? want.toUpperCase() : isoWeek(sessions[0].ts);
+  const group = sessions.filter((s) => isoWeek(s.ts) === week);
+  if (!group.length) {
+    const weeks = [...new Set(sessions.map((s) => isoWeek(s.ts)))].slice(0, 8);
+    console.log(`No sessions in ${week}. Available: ${weeks.join(", ")}`);
+    return;
+  }
+
+  // Ranked by how many sessions touched them: what recurred is what the week
+  // was actually about, which a single session's list cannot show.
+  const rank = (pick) => {
+    const count = new Map();
+    for (const s of group) for (const v of new Set(pick(s))) count.set(v, (count.get(v) || 0) + 1);
+    return [...count.entries()].sort((a, b) => b[1] - a[1]);
+  };
+
+  const turns = group.reduce((n, s) => n + s.turns, 0);
+  console.log(`# ${week}${project ? ` -- ${project}` : ""}`);
+  console.log(`${group.length} session(s), ${turns} turns\n`);
+
+  console.log("## What was asked (verbatim, first line of each turn)");
+  for (const s of group) {
+    console.log(`\n- ${(s.ts || "").slice(0, 10)} (${s.session.slice(0, 8)})`);
+    for (const a of s.asks.slice(0, 6)) console.log(`    ${a}`);
+  }
+
+  const files = rank((s) => s.files.map((f) => path.basename(f))).slice(0, 15);
+  if (files.length) {
+    console.log("\n## Files touched (sessions that touched each)");
+    for (const [f, n] of files) console.log(`  ${String(n).padStart(3)}x  ${f}`);
+  }
+  const cmds = rank((s) => s.cmds.map((c) => c.split(/\s+/)[0])).slice(0, 12);
+  if (cmds.length) {
+    console.log("\n## Commands run");
+    for (const [c, n] of cmds) console.log(`  ${String(n).padStart(3)}x  ${c}`);
+  }
+  console.log("\n(Verbatim material for a narrative. Nothing here was generated by a model.)");
+}
+
+function cmdTopics(args) {
+  // A theme is what this project talks about and others do not. Raw frequency
+  // cannot see that: it returns "error", "necesito", "true" -- words every
+  // project uses. The contrast against the rest of the corpus is what separates
+  // a subject from vocabulary, so this is per-project by construction and
+  // --global is meaningless here.
+  const project = resolveProject(process.cwd());
+  const topArg = args.find((a) => /^--top=\d+$/.test(a));
+  const top = topArg ? Number(topArg.split("=")[1]) : 20;
+
+  let lines;
+  try { lines = fs.readFileSync(CHUNKS, "utf8").split("\n"); } catch { lines = []; }
+  const here = new Map(), everywhere = new Map();
+  const hereSessions = new Set();
+  for (const line of lines) {
+    if (!line) continue;
+    let rec;
+    try { rec = JSON.parse(line); } catch { continue; }
+    const mine = rec.project === project;
+    if (mine) hereSessions.add(rec.session);
+    for (const w of new Set(termsOf(rec.text))) {
+      if (/^[\d._-]+$/.test(w)) continue;
+      const g = everywhere.get(w) || new Set();
+      g.add(rec.project); everywhere.set(w, g);
+      if (mine) {
+        const h = here.get(w) || new Set();
+        h.add(rec.session); here.set(w, h);
+      }
+    }
+  }
+  if (hereSessions.size < 2) {
+    console.log("Not enough history in this project yet for themes.");
+    return;
+  }
+
+  const out = [...here.entries()]
+    .map(([w, s]) => [w, s.size, (everywhere.get(w) || new Set()).size])
+    .filter(([, mine]) => mine >= 2)
+    // Present in few other projects: that is what makes it this project's
+    // subject rather than everyone's filler.
+    .filter(([, , projects]) => projects <= 3)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, top);
+  if (!out.length) { console.log("No distinctive themes found yet."); return; }
+
+  console.log(`Themes distinctive to this project (${hereSessions.size} sessions):
+`);
+  for (const [term, mine, projects] of out) {
+    console.log(`  ${String(mine).padStart(4)} sessions here | ${projects} project(s) total  ${term}`);
+  }
+  console.log(`
+Search any of them: search <term>`);
 }
 
 function cmdRules() {
@@ -630,6 +779,12 @@ async function selftest() {
   assert(ptrs.join("").length <= Math.floor(100 * CHARS_PER_TOKEN), "presupuesto no respetado");
   assert(!ptrs.some((p) => p.includes("x".repeat(50))), "el puntero arrastro el cuerpo");
 
+  // ISO weeks decide how digests group; a wrong boundary silently files a
+  // session under the wrong week and the digest quietly omits it.
+  assert(isoWeek("2026-01-01T00:00:00Z") === "2026-W01", "ISO week of Jan 1 wrong: " + isoWeek("2026-01-01T00:00:00Z"));
+  assert(isoWeek("2026-12-31T00:00:00Z") === "2026-W53", "ISO week of Dec 31 wrong: " + isoWeek("2026-12-31T00:00:00Z"));
+  assert(isoWeek("no es fecha") === "unknown", "fecha invalida no manejada");
+
   console.log("OK: selftest passed");
 }
 
@@ -649,9 +804,12 @@ async function main() {
   if (cmd === "show") return cmdShow(args);
   if (cmd === "search") return cmdSearch(args);
   if (cmd === "sessions") return cmdSessions(args);
+  if (cmd === "timeline") return cmdTimeline(args);
+  if (cmd === "digest") return cmdDigest(args);
+  if (cmd === "topics") return cmdTopics(args);
   if (cmd === "rules") return cmdRules();
   if (cmd === "stats") return cmdStats();
-  console.log("uso: recall.mjs [index|inject|show|search|sessions|rules|stats|--selftest]");
+  console.log("usage: recall.mjs [index|inject|search|show|sessions|timeline|digest|topics|rules|stats|--selftest]");
 }
 
 function readStdin() {
