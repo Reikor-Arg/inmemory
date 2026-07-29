@@ -1132,6 +1132,76 @@ function cmdRules() {
   if (rules) { console.log("<ground_rules>"); console.log(rules); console.log("</ground_rules>"); }
 }
 
+// Turns "it does not work" into a list of specific things that are or are not
+// true. Every check says what to do about a failure -- a diagnostic that only
+// reports a problem leaves the user exactly where they started.
+function cmdDoctor() {
+  // Three levels, not two. A diagnostic that flags an expected state as a
+  // failure teaches the reader to skim past all of it, including the line that
+  // mattered.
+  const ok = [], bad = [], info = [];
+  const check = (cond, good, fix) => (cond ? ok : bad).push(cond ? good : fix);
+  const note = (cond, good, msg) => (cond ? ok : info).push(cond ? good : msg);
+
+  const major = Number((process.versions.node || "0").split(".")[0]);
+  check(major >= 14, `Node ${process.versions.node}`,
+        `Node ${process.versions.node} is too old -- needs 14 or newer.`);
+
+  const meta = readJson(META, null);
+  const docs = meta ? meta.docs || 0 : 0;
+  check(docs > 0, `${docs} turns indexed`,
+        "Index is empty. Run:  index --all   (about 25s for a large history)");
+
+  let transcripts = 0;
+  try {
+    for (const d of fs.readdirSync(PROJECTS_DIR)) {
+      try {
+        transcripts += fs.readdirSync(path.join(PROJECTS_DIR, d))
+          .filter((f) => f.endsWith(".jsonl")).length;
+      } catch { /* unreadable project dir */ }
+    }
+  } catch { /* no projects dir */ }
+  check(transcripts > 0, `${transcripts} transcripts found in ${PROJECTS_DIR}`,
+        `No transcripts in ${PROJECTS_DIR}. Claude Code writes them itself -- ` +
+        "if this is a fresh install there is simply nothing to index yet.");
+
+  const project = resolveProject(process.cwd());
+  const here = fs.existsSync(path.join(PROJECTS_DIR, project));
+  note(here, `This directory maps to project "${project}"`,
+       `No transcripts yet for this directory (expected "${project}") -- expected ` +
+       "in a project you have not used Claude Code in. It fills as you work.");
+
+  try {
+    ensureRoot();
+    const probe = path.join(ROOT, ".probe");
+    fs.writeFileSync(probe, "x");
+    fs.unlinkSync(probe);
+    ok.push(`Index directory is writable (${ROOT})`);
+  } catch (e) {
+    bad.push(`Cannot write to ${ROOT}: ${e.message}. Indexing will silently do nothing.`);
+  }
+
+  const git = fs.existsSync(path.join(process.cwd(), ".git"));
+  note(git, "Inside a git repository (standup available)",
+       "Not a git repository -- everything works except standup.");
+
+  if (docs > 0) {
+    const t0 = Date.now();
+    let hits = 0;
+    try { hits = search("index recall memory", null, null, 4).length; } catch { /* reported below */ }
+    ok.push(`Search runs in ${Date.now() - t0} ms (${hits} hit(s) on a sample query)`);
+  }
+
+  console.log("inmemory doctor\n");
+  for (const line of ok) console.log(`  OK    ${line}`);
+  for (const line of info) console.log(`  NOTE  ${line}`);
+  for (const line of bad) console.log(`  FIX   ${line}`);
+  console.log(bad.length
+    ? `\n${bad.length} thing(s) to fix above.`
+    : "\nNothing to fix. If context still is not arriving, the hooks may not be " +
+      "loaded: restart Claude Code, and check /plugin shows inmemory as enabled.");
+}
+
 function cmdStats() {
   const meta = readJson(META, { docs: 0, files: {} });
   let bytes = 0;
@@ -1228,8 +1298,9 @@ async function main() {
   if (cmd === "standup") return cmdStandup(args);
   if (cmd === "decide") return cmdDecide(args);
   if (cmd === "rules") return cmdRules();
+  if (cmd === "doctor") return cmdDoctor();
   if (cmd === "stats") return cmdStats();
-  console.log("usage: recall.mjs [index|inject|search|show|sessions|timeline|digest|topics|map|duplicates|standup|decide|rules|stats|--selftest]");
+  console.log("usage: recall.mjs [index|inject|search|show|sessions|timeline|digest|topics|map|duplicates|standup|decide|doctor|rules|stats|--selftest]");
 }
 
 function readStdin() {

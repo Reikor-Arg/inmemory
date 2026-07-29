@@ -1,6 +1,6 @@
 {
   "name": "inmemory",
-  "version": "2.2.0",
+  "version": "2.3.0",
   "description": "Verbatim recall across Claude Code sessions, plus a gate that stops oversized skills from flooding the prompt. Pure Node, no dependencies, no API calls.",
   "keywords": [
     "memory",

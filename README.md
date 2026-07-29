@@ -17,12 +17,83 @@ your machine.**
 
 ## Install
 
+**1. Check you have Node** (any version from 14 on):
+
+```
+node --version
+```
+
+If that prints nothing, install it from [nodejs.org](https://nodejs.org) — the
+LTS build is fine. Nothing else is needed: no npm install, no build step, no
+API key.
+
+**2. Add and install, inside Claude Code:**
+
 ```
 /plugin marketplace add Reikor-Arg/inmemory
 /plugin install inmemory
 ```
 
-Needs Node — any version from 14 on. Nothing to configure.
+**3. Restart Claude Code.** Hooks are read at startup, so nothing happens until
+you do.
+
+**4. Index the history you already have** (optional, about 25 seconds):
+
+```
+/recall --global anything
+```
+
+Or, from a terminal:
+
+```
+node ~/.claude/plugins/*/inmemory/*/hooks/recall.mjs index --all
+```
+
+Without this, history is indexed project by project as you open each one, which
+also works — the backfill just makes everything searchable immediately.
+
+### Check it worked
+
+```
+/doctor
+```
+
+It reports Node version, how many turns are indexed, whether the index is
+writable, and search latency. `FIX` lines are real problems and each says what
+to do; `NOTE` lines are expected states, not failures.
+
+The clearest sign it is running: open a project you have used before, and the
+first thing in the session is a short block saying where you left off.
+
+### Manual install
+
+If `/plugin marketplace add` is not available in your version:
+
+```
+git clone https://github.com/Reikor-Arg/inmemory ~/.claude/inmemory
+```
+
+Then add to `~/.claude/settings.json`, replacing `<HOME>` with your home path:
+
+```json
+"hooks": {
+  "SessionStart": [{ "matcher": "startup|resume|clear|compact", "hooks": [
+    { "type": "command", "command": "node <HOME>/.claude/inmemory/hooks/recall.mjs session-start", "timeout": 15 }]}],
+  "UserPromptSubmit": [{ "hooks": [
+    { "type": "command", "command": "node <HOME>/.claude/inmemory/hooks/recall.mjs inject", "timeout": 15 }]}],
+  "Stop": [{ "hooks": [
+    { "type": "command", "command": "node <HOME>/.claude/inmemory/hooks/recall.mjs hook-index", "timeout": 30 }]}],
+  "PreToolUse": [
+    { "matcher": "Skill", "hooks": [
+      { "type": "command", "command": "node <HOME>/.claude/inmemory/hooks/skill-gate.mjs", "timeout": 10 }]},
+    { "matcher": "Read|Edit|Write|NotebookEdit", "hooks": [
+      { "type": "command", "command": "node <HOME>/.claude/inmemory/hooks/recall.mjs file-context", "timeout": 10 }]}
+  ]
+}
+```
+
+Slash commands and skills only come with the plugin install; the hooks above are
+what does the automatic work.
 
 The first session indexes the transcripts Claude Code has been writing all
 along. Nothing new is recorded. Nothing is uploaded.
@@ -87,6 +158,7 @@ turns index in about 25 seconds and cost nothing.
 | `/standup` | uncommitted work, active branches, how far each is from the default |
 | `/decide <what and why>` | record a decision so the reason outlives the session |
 | `/how-it-works` | what the plugin does, what it costs, what it cannot do |
+| `/doctor` | check the install and report anything wrong |
 
 All computed from the index. None of them run a model, so none of them cost
 tokens to produce — only the output you actually read.
@@ -164,6 +236,58 @@ session. Nothing is sent anywhere, ever.
 Every hook fails open. A broken index, an unreadable file, a malformed payload:
 the turn proceeds exactly as if the plugin were not installed. It can lose the
 ability to help. It cannot block your work.
+
+That is also why a silent plugin is not evidence of a bug — see below.
+
+### Nothing is being injected
+
+Usually correct behaviour: nothing matched. A vague question, or a subject never
+discussed before, injects nothing on purpose. Confirm the index is populated
+with `/doctor`, then try `/recall <a distinctive phrase you know you used>`.
+
+If that finds nothing either, the words may simply not match — retrieval is
+lexical (see Honest limits).
+
+### `/doctor` says the index is empty
+
+Run the backfill from the install steps. If it stays empty, the index directory
+is probably not writable; `/doctor` reports that explicitly.
+
+### Commands are not found
+
+The plugin is not installed or not loaded. Restart Claude Code, then check
+`/plugin` lists inmemory as enabled. Hooks configured by hand do the automatic
+work but do **not** provide slash commands.
+
+### It worked and then stopped
+
+Almost always a Node change — a version manager switching versions, or a PATH
+that a login shell has and the hook shell does not. `node --version` from a
+plain terminal is the first check.
+
+## Updating
+
+```
+/plugin marketplace update inmemory
+```
+
+The index format is stable across versions. If a release ever needs a rebuild,
+the notes will say so; deleting `~/.claude/recall/` always forces one safely.
+
+## Uninstalling
+
+```
+/plugin uninstall inmemory
+```
+
+Then delete the index if you want the disk back:
+
+```
+rm -rf ~/.claude/recall
+```
+
+Your transcripts in `~/.claude/projects/` are Claude Code's own and are left
+untouched. `DECISIONS.md` files stay in your repositories, where they belong.
 
 ## Tuning
 
