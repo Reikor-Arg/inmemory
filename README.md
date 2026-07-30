@@ -83,10 +83,19 @@ This is the failure mode to know about, because it is the inverse of the usual
 one. A summary at least *saw* the retraction. Verbatim text did not, and it reads
 as more trustworthy precisely because it is literally what was said.
 
-The only defence is that every hit carries its timestamp to the minute, so two
-contradicting turns can be ordered by eye. That puts the judgement on the reader,
-which is honest but is not the same as solving it. Treat a hit as *something that
-was said then*, never as *what is true now*.
+What is done about it: for every hit, the search also returns the latest *other*
+turn from that same session which matches the query, marked `MAS NUEVO`. A change
+of mind lives where it happened — same session, further on — so that is where it
+looks. Every hit also carries its timestamp to the minute, so two contradicting
+turns can be ordered by eye.
+
+That is deliberately not recency weighting. Weighting needs a constant nobody can
+guess, and too much of it breaks finding something from three weeks ago, which is
+half the value here. This adds context instead of second-guessing the score.
+
+It still cannot catch a retraction made in a *different* session, or one phrased
+without any of the query's words. So: treat a hit as *something that was said
+then*, never as *what is true now*.
 
 It also only knows what was written down, and an empty index has nothing to say,
 so the first week of a fresh install is quieter than the fourth.

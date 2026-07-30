@@ -3,6 +3,25 @@
 Newest first. Every figure quoted here was measured on a real session, not
 estimated.
 
+## 2.12.0 - the search now looks for the change of mind
+
+2.11.0 named the problem: the ranking has no recency term, so a retracted turn
+comes back as readily as its replacement, and BM25 rewards rare words, which the
+abandoned wording usually is. This does something about it.
+
+For every hit, the search also returns the latest OTHER turn from that same
+session which matches the query, marked MAS NUEVO. A change of mind lives where
+it happened -- same session, further on -- so that is where it looks. It reuses
+candidates already read for the ranking, so no extra disk reads and no model.
+
+Deliberately not recency weighting: that needs a constant nobody can guess, and
+too much of it breaks finding something from three weeks ago. This adds context
+instead of second-guessing the score.
+
+Still cannot catch a retraction made in a different session, or one phrased
+without any of the query words. It turns "the ranking has no idea" into "the
+ranking looks", which is not the same as solving it.
+
 ## 2.11.0 - name the failure mode verbatim recall actually has
 
 A transcript is full of things that were true for twenty minutes. The ranking is

@@ -455,7 +455,9 @@ export function search(prompt, project, excludeSession, limit = MAX_HITS,
   const need = Math.max(MIN_TERMS,
     Math.min(COVERAGE_CEILING, Math.ceil(terms.length * minCoverage)));
 
-  const hits = [];
+  // Every candidate that passes the gate, not just the first `limit`: the ones
+  // past the cut are what withLaterTurns searches for a change of mind.
+  const qualifying = [];
   const fd = openChunks();
   try {
     for (const [id, score] of ranked) {
@@ -464,13 +466,50 @@ export function search(prompt, project, excludeSession, limit = MAX_HITS,
       if (project && rec.project !== project) continue;
       if (excludeSession && rec.session === excludeSession) continue;
       if (covered(rec.text, terms) < need) continue;
-      hits.push({ ...rec, score: -score });
-      if (hits.length >= limit) break;
+      qualifying.push({ ...rec, score: -score });
     }
   } finally {
     if (fd) fs.closeSync(fd);
   }
-  return hits;
+  return withLaterTurns(qualifying, limit);
+}
+
+// A transcript is full of things that were true for twenty minutes, and the
+// ranking has no recency term: a turn that was later retracted scores exactly as
+// well as the one that replaced it. Worse, BM25 rewards rare words, and the
+// wording of an abandoned approach is usually rarer than the wording that
+// survived -- so the retracted turn can outrank its own replacement.
+//
+// Weighting recency was the obvious fix and is the wrong one: it needs a
+// constant nobody can guess, and too much of it breaks finding something from
+// three weeks ago, which is half the value here.
+//
+// Instead, look where a change of mind actually lives: the same session, further
+// on. For each hit, hand back the latest other chunk from that session which
+// also matches the query, marked as the newer one. No constant to tune, no
+// reordering -- it adds context rather than second-guessing the score.
+//
+// It cannot catch a retraction made in a different session, or one phrased
+// without any of the query's words. It turns "the ranking has no idea" into "the
+// ranking looks", which is not the same as solving it.
+export function withLaterTurns(qualifying, limit) {
+  const primary = qualifying.slice(0, limit);
+  const chosen = new Set(primary.map((h) => h.id));
+  const out = [];
+  for (const h of primary) {
+    out.push(h);
+    let later = null;
+    for (const c of qualifying) {
+      if (c.session !== h.session || chosen.has(c.id)) continue;
+      if (String(c.ts || "") <= String(h.ts || "")) continue;
+      if (!later || String(c.ts) > String(later.ts)) later = c;
+    }
+    if (later) {
+      chosen.add(later.id);
+      out.push({ ...later, newer: true });
+    }
+  }
+  return out;
 }
 
 // ------------------------------------------------------------------ output
@@ -497,7 +536,9 @@ export function renderPointers(hits, budgetTokens = BUDGET_TOKENS) {
     // rewards. The timestamp is the only thing telling the reader which of two
     // hits superseded the other, and a date alone cannot separate two turns
     // twenty minutes apart. Six characters is a cheap price for that.
-    const line = `  #${h.id} | ${(h.ts || "").slice(0, 16).replace("T", " ")} | sesion ${h.session.slice(0, 8)} | ${head}`;
+    const when = (h.ts || "").slice(0, 16).replace("T", " ");
+    const tag = h.newer ? " | MAS NUEVO, misma sesion" : "";
+    const line = `  #${h.id} | ${when} | sesion ${h.session.slice(0, 8)}${tag} | ${head}`;
     if (spent + line.length > cap) break;
     out.push(line);
     spent += line.length;
@@ -1857,6 +1898,38 @@ async function selftest() {
 
   clearReads(sess);
   try { fs.unlinkSync(probe); } catch { /* ya no esta */ }
+
+  // Un turno retractado puntua igual que el que lo reemplazo, asi que traer el
+  // posterior de la misma sesion es la unica senal de cual gano. Si esto se
+  // rompe, el indice devuelve decisiones muertas con cara de vigentes.
+  const q = [
+    { id: 1, session: "a", ts: "2026-01-01T10:00" },   // el abandonado, mejor score
+    { id: 2, session: "a", ts: "2026-01-01T10:20" },   // la retractacion
+    { id: 3, session: "b", ts: "2026-01-02T09:00" },
+    { id: 4, session: "a", ts: "2026-01-01T09:00" },   // anterior: no sirve
+  ];
+  const w = withLaterTurns(q, 1);
+  assert(w.length === 2, `esperaba el hit y su posterior, vinieron ${w.length}`);
+  assert(w[0].id === 1 && w[1].id === 2, `orden mal: ${w.map((x) => x.id).join(",")}`);
+  assert(w[1].newer === true, "el posterior no quedo marcado");
+  assert(!w[0].newer, "el primario no debe marcarse");
+
+  // El mas nuevo de la sesion, no el primero que aparece.
+  const w2 = withLaterTurns([
+    { id: 1, session: "a", ts: "2026-01-01T10:00" },
+    { id: 2, session: "a", ts: "2026-01-01T10:20" },
+    { id: 3, session: "a", ts: "2026-01-01T11:00" },
+  ], 1);
+  assert(w2.length === 2 && w2[1].id === 3, `debia traer el ultimo: ${JSON.stringify(w2.map((x) => x.id))}`);
+
+  // Nada posterior en la misma sesion -> un solo puntero, sin invento.
+  const w3 = withLaterTurns([{ id: 1, session: "a", ts: "2026-01-01T10:00" }], 1);
+  assert(w3.length === 1 && !w3[0].newer, "invento un posterior donde no habia");
+
+  // Ningun chunk se devuelve dos veces aunque sea el posterior de dos primarios.
+  const w4 = withLaterTurns(q, 4);
+  const ids = w4.map((x) => x.id);
+  assert(new Set(ids).size === ids.length, `duplico punteros: ${ids.join(",")}`);
 
   // Las reglas se inyectan en cada sesion: lo que se cuele aca se paga siempre.
   const doc = [

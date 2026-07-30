@@ -53,19 +53,37 @@ not, and it reads as more authoritative precisely because it is literally what w
 said. "This is what you actually wrote" is a strong claim, and it is true about
 the sentence while being false about the conclusion.
 
-What exists as a defence is thin and worth stating as thin: every hit carries its
-timestamp to the minute, so two contradicting turns can be ordered by eye. That
-was a date only until this was pointed out, which could not separate two turns
-twenty minutes apart.
+**Recency weighting is the obvious fix and it is the wrong one.** It needs a
+constant nobody can guess, and too much of it breaks the main use case — finding
+the thing from three weeks ago. Getting it right would mean measuring against real
+retractions, which requires being able to identify them first. Choosing the weight
+by intuition trades a known, documented failure for an unmeasured one.
 
-What has *not* been done, deliberately for now: recency weighting. Boosting recent
-chunks would break the main use case, which is finding the thing from three weeks
-ago, and the correct weight is not guessable — it would need measuring against
-real retractions, which means first being able to identify them. Doing it by
-intuition would trade a known, documented failure for an unmeasured one.
+What is done instead looks where a change of mind actually lives: **the same
+session, further on.** For each hit, `withLaterTurns` returns the latest other
+chunk from that session which also passes the query's coverage gate, marked as the
+newer one:
 
-So the honest framing, and it is now in the README: treat a hit as *something that
-was said then*, never as *what is true now*.
+```
+#4102 | 2026-07-28 10:15 | sesion da29b6ea | vamos con un umbral de score
+#4180 | 2026-07-28 11:40 | sesion da29b6ea | MAS NUEVO | el umbral no funciona, medido
+```
+
+No constant to tune, no reordering — it adds context rather than second-guessing
+the score. It reuses candidates already read for the ranking, so it costs no extra
+disk reads and no model.
+
+Timestamps are shown to the minute for the same reason. They were dates only until
+this was raised, and a date cannot separate two turns twenty minutes apart, which
+is exactly the case being described.
+
+Limits, since a mitigation presented as a fix is worse than none: it cannot catch
+a retraction made in a *different* session, or one phrased without any of the
+query's words, or one that falls outside the candidate window the ranking read. It
+turns "the ranking has no idea" into "the ranking looks".
+
+So the framing stays, and it is in the README: treat a hit as *something that was
+said then*, never as *what is true now*.
 
 ## Query expansion was built, measured, and removed
 
