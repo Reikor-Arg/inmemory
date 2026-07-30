@@ -36,6 +36,37 @@ A related trap: requiring coverage of *every* term means one extra rare word
 raises the bar and kills real hits. Coverage is capped at 3 terms for that
 reason.
 
+## Verbatim recall has no idea what was retracted
+
+The sharpest criticism this design has received, and it is correct.
+
+A transcript is full of things that were true for twenty minutes. The ranking is
+BM25 ordered by score, with **no recency term at all** — so a turn you later
+abandoned comes back exactly as readily as the one that replaced it. And the
+mechanism that makes BM25 useful makes this worse: it rewards rare terms, and the
+variable name from a discarded approach is often rarer than the one that
+survived. The retracted turn can outrank its own replacement.
+
+This is the inverse of the failure mode summaries have. A summary is lossy, but it
+*saw* the retraction — it had the whole session in front of it. Verbatim text did
+not, and it reads as more authoritative precisely because it is literally what was
+said. "This is what you actually wrote" is a strong claim, and it is true about
+the sentence while being false about the conclusion.
+
+What exists as a defence is thin and worth stating as thin: every hit carries its
+timestamp to the minute, so two contradicting turns can be ordered by eye. That
+was a date only until this was pointed out, which could not separate two turns
+twenty minutes apart.
+
+What has *not* been done, deliberately for now: recency weighting. Boosting recent
+chunks would break the main use case, which is finding the thing from three weeks
+ago, and the correct weight is not guessable — it would need measuring against
+real retractions, which means first being able to identify them. Doing it by
+intuition would trade a known, documented failure for an unmeasured one.
+
+So the honest framing, and it is now in the README: treat a hit as *something that
+was said then*, never as *what is true now*.
+
 ## Query expansion was built, measured, and removed
 
 Retrieval is lexical, which is the plugin's real limit — 90.0% recall when a

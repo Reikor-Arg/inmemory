@@ -73,6 +73,21 @@ tokens *and* sends work down the wrong path.
 
 One machine, one corpus, one user — a shape, not a benchmark.
 
+**A transcript is full of things that were true for twenty minutes.** There is no
+recency weighting in the ranking — it is BM25, ordered by score alone — so a turn
+you later retracted can come back as readily as the one that replaced it. Worse:
+BM25 rewards rare terms, and the variable name from an abandoned approach is
+often rarer than the one that survived, so the retracted turn can outrank it.
+
+This is the failure mode to know about, because it is the inverse of the usual
+one. A summary at least *saw* the retraction. Verbatim text did not, and it reads
+as more trustworthy precisely because it is literally what was said.
+
+The only defence is that every hit carries its timestamp to the minute, so two
+contradicting turns can be ordered by eye. That puts the judgement on the reader,
+which is honest but is not the same as solving it. Treat a hit as *something that
+was said then*, never as *what is true now*.
+
 It also only knows what was written down, and an empty index has nothing to say,
 so the first week of a fresh install is quieter than the fourth.
 

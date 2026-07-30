@@ -491,7 +491,13 @@ export function renderPointers(hits, budgetTokens = BUDGET_TOKENS) {
   let spent = 0;
   for (const h of hits) {
     const head = firstLine(h.text).slice(0, PREVIEW_CHARS);
-    const line = `  #${h.id} | ${(h.ts || "").slice(0, 10)} | sesion ${h.session.slice(0, 8)} | ${head}`;
+    // Date *and* time, because the ranking has no recency term: two turns that
+    // contradict each other are ordered by score, not by which one came later,
+    // and a retracted decision often carries the rarer wording that BM25
+    // rewards. The timestamp is the only thing telling the reader which of two
+    // hits superseded the other, and a date alone cannot separate two turns
+    // twenty minutes apart. Six characters is a cheap price for that.
+    const line = `  #${h.id} | ${(h.ts || "").slice(0, 16).replace("T", " ")} | sesion ${h.session.slice(0, 8)} | ${head}`;
     if (spent + line.length > cap) break;
     out.push(line);
     spent += line.length;

@@ -3,6 +3,27 @@
 Newest first. Every figure quoted here was measured on a real session, not
 estimated.
 
+## 2.11.0 - name the failure mode verbatim recall actually has
+
+A transcript is full of things that were true for twenty minutes. The ranking is
+BM25 ordered by score with no recency term, so a turn you later retracted comes
+back as readily as the one that replaced it -- and because BM25 rewards rare
+terms, and the variable name from an abandoned approach is often rarer than the
+one that survived, the retracted turn can outrank its own replacement.
+
+This is the inverse of the failure mode summaries have. A summary is lossy but it
+saw the retraction; verbatim text did not, and it reads as more trustworthy
+precisely because it is literally what was said.
+
+Now stated in the README as a limit, with the honest framing: a hit is something
+that was said then, not what is true now. Pointers also carry the timestamp to
+the minute rather than the date alone, which is what lets two contradicting turns
+be ordered at all -- a date cannot separate two turns twenty minutes apart.
+
+Recency weighting was not added. It would break finding the thing from three
+weeks ago, and the right weight is not guessable without measuring it against
+real retractions.
+
 ## 2.10.2 — tested on macOS and Linux for the first time
 
 A workflow now runs the selftests on Ubuntu 18/20/22, macOS and Windows. It
