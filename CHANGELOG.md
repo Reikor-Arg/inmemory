@@ -3,6 +3,27 @@
 Newest first. Every figure quoted here was measured on a real session, not
 estimated.
 
+## 2.13.0 - a local model can judge what superseded what
+
+withLaterTurns only finds a retraction that shares the query words. A model finds
+it regardless: it sees "no, scrap that" with no vocabulary in common. With
+INMEMORY_ADJUDICATE=1 and Ollama running, /recall asks the local model whether the
+later turn actually reversed the earlier one and marks it SUPERSEDED.
+
+Only on /recall, never on the automatic injection -- the injection has to cost
+nothing you did not ask for. Only pairs the ranking already flagged, capped at
+two: about 1.4 s on a warm 8B model.
+
+Two things were wrong on the first attempt, both caught by running it:
+
+- Asked to answer "SUPERSEDES or UNRELATED", llama3.1:8b answered SUPERSEDES for
+  everything, unrelated pairs included, and reversing the options changed nothing.
+  A classifier that always says yes marks live decisions dead. As a plain yes/no
+  question the same model scored 7/7, four of them same-topic non-retractions.
+- There is no Haiku fallback.  is not an API call, it is a whole Claude
+  Code agent; handed the prompt it replied "What do you mean by Two?". A direct
+  API call needs a key most people never set. So this needs Ollama and says so.
+
 ## 2.12.1 - the plugin spoke Spanish
 
 Everything the plugin printed was in Spanish -- the injection header, the NEWER

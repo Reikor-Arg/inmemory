@@ -951,15 +951,127 @@ function cmdShow(args) {
   }
 }
 
-function cmdSearch(args) {
+// ------------------------------------------------- adjudication (opt-in)
+//
+// withLaterTurns finds a retraction only when it lives in the same session and
+// shares the query's words. A model reading both turns can tell regardless: it
+// sees "no, scrap that" with no vocabulary in common at all.
+//
+// This is the only place a model is allowed to run, and it is deliberately not
+// on the automatic path. Measured: `claude -p --model haiku` takes 6.9 s. Seven
+// seconds of dead wait before every prompt you type is worse than the problem it
+// solves. Seven seconds after you asked for a search is fine.
+//
+// Off unless INMEMORY_ADJUDICATE=1. Ollama first, because it is local and free.
+// Fails open everywhere: no verdict just means the output looks like it always
+// did.
+
+// Yes/no, and not a choice between two labels. Measured on llama3.1:8b: asked to
+// answer "SUPERSEDES or UNRELATED" it answered SUPERSEDES for everything,
+// including turns with nothing to do with each other, and swapping the order of
+// the two options changed nothing. A classifier that always says yes is worse
+// than none, because it marks live decisions dead. Reframed as a yes/no question
+// the same model scored 7/7, including four pairs on the same topic where the
+// later turn did not reverse anything.
+const ADJUDICATE_PROMPT =
+  "Two turns from one work session, the second later than the first.\n" +
+  "Did the second one change the decision made in the first?\n" +
+  "Answer YES or NO and nothing else.\n\n";
+
+function ollamaAsk(prompt, model, timeoutMs) {
+  const raw = process.env.OLLAMA_HOST || "127.0.0.1:11434";
+  const base = /^https?:\/\//.test(raw) ? raw : `http://${raw}`;
+  const body = JSON.stringify({
+    model, prompt, stream: false, options: { num_predict: 8, temperature: 0 },
+  });
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+    try {
+      const url = new URL(`${base}/api/generate`);
+      const req = http.request({
+        hostname: url.hostname, port: url.port, path: url.pathname, method: "POST",
+        headers: { "content-type": "application/json", "content-length": Buffer.byteLength(body) },
+      }, (res) => {
+        let data = "";
+        res.setEncoding("utf8");
+        res.on("data", (c) => { if (data.length < 8000) data += c; });
+        res.on("end", () => {
+          try { done(JSON.parse(data).response || null); } catch { done(null); }
+        });
+      });
+      req.setTimeout(timeoutMs, () => { req.destroy(); done(null); });
+      req.on("error", () => done(null));
+      req.end(body);
+    } catch { done(null); }
+  });
+}
+
+// Which model, decided once per run rather than per pair.
+async function adjudicator() {
+  if (process.env.INMEMORY_ADJUDICATE !== "1") return null;
+  const model = await ollamaModel(1000);
+  if (model) return { name: `ollama/${model}`, ask: (p) => ollamaAsk(p, model, 25000) };
+
+  // There is no Haiku fallback, and the reason is not cost. `claude -p` is not an
+  // API call: it is a whole Claude Code agent, carrying its own system prompt,
+  // this project's CLAUDE.md and its MCP servers. Handed this exact prompt it
+  // answered "What do you mean by Two? Need context" -- an agent given a vague
+  // task, which is what it is. A direct API call needs a key most people running
+  // Claude Code never set. So this needs Ollama and says so rather than
+  // pretending.
+  process.stderr.write(
+    "adjudication is on but no Ollama answered on " +
+    `${process.env.OLLAMA_HOST || "127.0.0.1:11434"} -- showing hits unjudged.\n`);
+  return null;
+}
+
+// Bounded on purpose: each pair is a model round trip, and a
+// search nobody can wait for is a search nobody runs.
+export function supersededPairs(hits, max = 2) {
+  const pairs = [];
+  for (let i = 1; i < hits.length && pairs.length < max; i++) {
+    if (hits[i].newer && hits[i - 1] && hits[i].session === hits[i - 1].session) {
+      pairs.push([hits[i - 1], hits[i]]);
+    }
+  }
+  return pairs;
+}
+
+const clip = (t, n = 400) => (t.length <= n ? t : t.slice(0, n) + "\n[...]");
+
+async function cmdSearch(args) {
   const global = args.includes("--global");
   const query = args.filter((a) => a !== "--global").join(" ").trim();
-  if (!query) { console.log("uso: recall.mjs search [--global] <consulta>"); return; }
+  if (!query) { console.log("usage: recall.mjs search [--global] <query>"); return; }
   const hits = search(query, global ? null : resolveProject(process.cwd()), null, 10, 0.34);
-  if (!hits.length) { console.log("Sin resultados."); return; }
+  if (!hits.length) { console.log("No results."); return; }
+
+  const verdicts = new Map();
+  const judge = await adjudicator();
+  if (judge) {
+    const pairs = supersededPairs(hits);
+    if (pairs.length) {
+      process.stderr.write(`adjudicating ${pairs.length} pair(s) with ${judge.name}...\n`);
+      for (const [older, newer] of pairs) {
+        let out = null;
+        try {
+          out = await judge.ask(ADJUDICATE_PROMPT +
+            `EARLIER (${(older.ts || "").slice(0, 16)}):\n${clip(older.text)}\n\n` +
+            `LATER (${(newer.ts || "").slice(0, 16)}):\n${clip(newer.text)}\n`);
+        } catch { /* fail open */ }
+        if (out && /^\s*YES/i.test(out)) verdicts.set(older.id, newer.id);
+      }
+    }
+  }
+
   for (const h of hits) {
+    const tags = [];
+    if (h.newer) tags.push("NEWER, same session");
+    if (verdicts.has(h.id)) tags.push(`SUPERSEDED by #${verdicts.get(h.id)}`);
+    const tag = tags.length ? ` | ${tags.join(" | ")}` : "";
     const body = h.text.length <= 1200 ? h.text : h.text.slice(0, 1200) + "\n[...]";
-    console.log(`\n=== #${h.id} | session ${h.session.slice(0, 8)} | ${(h.ts || "").slice(0, 16)} | score ${h.score.toFixed(2)} ===\n${body}`);
+    console.log(`\n=== #${h.id} | session ${h.session.slice(0, 8)} | ${(h.ts || "").slice(0, 16)} | score ${h.score.toFixed(2)}${tag} ===\n${body}`);
   }
 }
 
@@ -1514,7 +1626,9 @@ export function rulesText(body) {
 // A local model does the cheap tier for free. Worth one line of the injection,
 // but only when it is actually there -- an absent Ollama costs a refused
 // connection on localhost and says nothing.
-async function ollamaLine() {
+// Returns the name of a model Ollama has loaded, or null. Used both to add a
+// line to the routing rules and to decide who adjudicates a contradiction.
+export async function ollamaModel(timeoutMs = 300) {
   const raw = process.env.OLLAMA_HOST || "127.0.0.1:11434";
   const url = /^https?:\/\//.test(raw) ? raw : `http://${raw}`;
   return new Promise((resolve) => {
@@ -1525,20 +1639,30 @@ async function ollamaLine() {
         if (res.statusCode !== 200) { res.resume(); return done(null); }
         let data = "";
         res.setEncoding("utf8");
-        res.on("data", (c) => { if (data.length < 4000) data += c; });
+        res.on("data", (c) => { if (data.length < 20000) data += c; });
         res.on("end", () => {
           try {
-            const first = (JSON.parse(data).models || [])[0];
-            done(first && first.name
-              ? `- Ollama is running here with ${first.name}. Use it for the transforms above instead of Haiku: same work, no tokens.`
-              : null);
+            const models = JSON.parse(data).models || [];
+            const want = process.env.INMEMORY_OLLAMA_MODEL;
+            if (want) {
+              done(models.some((m) => m.name === want) ? want : (models[0] || {}).name || null);
+              return;
+            }
+            done((models[0] || {}).name || null);
           } catch { done(null); }
         });
       });
-      req.setTimeout(300, () => { req.destroy(); done(null); });
+      req.setTimeout(timeoutMs, () => { req.destroy(); done(null); });
       req.on("error", () => done(null));
     } catch { done(null); }
   });
+}
+
+async function ollamaLine() {
+  const name = await ollamaModel();
+  return name
+    ? `- Ollama is running here with ${name}. Use it for the transforms above instead of Haiku: same work, no tokens.`
+    : null;
 }
 
 async function emitRules() {
@@ -1931,6 +2055,17 @@ async function selftest() {
   const w4 = withLaterTurns(q, 4);
   const ids = w4.map((x) => x.id);
   assert(new Set(ids).size === ids.length, `duplicated pointers: ${ids.join(",")}`);
+
+  // Only a pair the ranking itself flagged gets sent to a model. Widen this and
+  // an explicit search turns into a dozen round trips nobody asked for.
+  const A = { id: 1, session: "a", ts: "10:00" };
+  const B = { id: 2, session: "a", ts: "10:20", newer: true };
+  const C = { id: 3, session: "b", ts: "11:00" };
+  assert(supersededPairs([A, B]).length === 1, "did not pair a hit with its later turn");
+  assert(supersededPairs([A, C]).length === 0, "paired a turn that was never flagged newer");
+  assert(supersededPairs([A, { ...B, session: "z" }]).length === 0, "paired across sessions");
+  assert(supersededPairs([A, B, A, B], 1).length === 1, "ignored the pair cap");
+  assert(supersededPairs([B]).length === 0, "paired a newer turn with nothing before it");
 
   // The rules ship on every session: anything that slips in here is paid for always.
   const doc = [

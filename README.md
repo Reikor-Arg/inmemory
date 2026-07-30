@@ -84,7 +84,7 @@ one. A summary at least *saw* the retraction. Verbatim text did not, and it read
 as more trustworthy precisely because it is literally what was said.
 
 What is done about it: for every hit, the search also returns the latest *other*
-turn from that same session which matches the query, marked `MAS NUEVO`. A change
+turn from that same session which matches the query, marked `NEWER`. A change
 of mind lives where it happened — same session, further on — so that is where it
 looks. Every hit also carries its timestamp to the minute, so two contradicting
 turns can be ordered by eye.
@@ -93,9 +93,22 @@ That is deliberately not recency weighting. Weighting needs a constant nobody ca
 guess, and too much of it breaks finding something from three weeks ago, which is
 half the value here. This adds context instead of second-guessing the score.
 
-It still cannot catch a retraction made in a *different* session, or one phrased
-without any of the query's words. So: treat a hit as *something that was said
-then*, never as *what is true now*.
+That still cannot catch a retraction phrased without any of the query's words. For
+that there is one opt-in: with `INMEMORY_ADJUDICATE=1` and Ollama running,
+`/recall` asks the local model whether the later turn actually reversed the
+earlier one, and marks it `SUPERSEDED` when it did. A model sees "no, scrap that"
+with no vocabulary in common at all.
+
+It needs Ollama and there is no cloud fallback. `claude -p` looks like a cheap way
+to ask Haiku but it is a whole Claude Code agent, and handed a classification
+prompt it asks what you mean; a real API call needs a key most people never set.
+
+Only on `/recall`, never on the automatic injection: the point of the injection is
+that it costs nothing you did not ask for. And only for pairs the ranking already
+flagged, capped at two — about 1.4 s on a warm 8B model.
+
+Even with it on: treat a hit as *something that was said then*, never as *what is
+true now*.
 
 It also only knows what was written down, and an empty index has nothing to say,
 so the first week of a fresh install is quieter than the fourth.
@@ -128,6 +141,7 @@ run outside the model.
 | `INMEMORY_RULES` | 1 | `0` stops injecting the routing rules |
 | `INMEMORY_UPDATE_CHECK` | 1 | `0` stops the daily new-release check |
 | `OLLAMA_HOST` | 127.0.0.1:11434 | where to look for a local model |
+| `INMEMORY_ADJUDICATE` | 0 | `1` lets a local model judge supersession on `/recall` |
 | `SKILL_WEIGHT_LIMIT` | 120000 | bytes above which a skill is declined |
 
 Edit the routing rules in `ground_rules.md` — everything after the last `---` in

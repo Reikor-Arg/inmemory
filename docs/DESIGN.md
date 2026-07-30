@@ -65,8 +65,8 @@ chunk from that session which also passes the query's coverage gate, marked as t
 newer one:
 
 ```
-#4102 | 2026-07-28 10:15 | sesion da29b6ea | vamos con un umbral de score
-#4180 | 2026-07-28 11:40 | sesion da29b6ea | MAS NUEVO | el umbral no funciona, medido
+#4102 | 2026-07-28 10:15 | session da29b6ea | going with a bm25 score threshold
+#4180 | 2026-07-28 11:40 | session da29b6ea | NEWER | the threshold does not work, measured
 ```
 
 No constant to tune, no reordering — it adds context rather than second-guessing
@@ -84,6 +84,35 @@ turns "the ranking has no idea" into "the ranking looks".
 
 So the framing stays, and it is in the README: treat a hit as *something that was
 said then*, never as *what is true now*.
+
+### Asking a model, and the two ways that failed
+
+For a retraction that shares no words with the query, only a model can tell. That
+is allowed by the invariants -- verbatim on write, summarising on read -- so it
+exists as `INMEMORY_ADJUDICATE=1`, on `/recall` only, never on the automatic
+injection.
+
+Two things about it were wrong on the first attempt and both were caught by
+running it rather than reading it:
+
+**The prompt.** Asked to answer "SUPERSEDES or UNRELATED", llama3.1:8b answered
+SUPERSEDES for every pair, including turns with nothing to do with each other, and
+reversing the order of the two options changed nothing. A classifier that always
+says yes is worse than none: it marks live decisions dead. Reframed as a plain
+yes/no question -- "did the second one change the decision made in the first?" --
+the same model scored 7/7 on seven pairs, four of them same-topic turns that did
+not reverse anything.
+
+**The fallback.** `claude -p --model haiku` looks like a cheap way to reach a small
+model without an API key, and it does run: 6.9 s for a one-word reply. But it is
+not an API call, it is a whole Claude Code agent carrying its own system prompt,
+the project's CLAUDE.md and its MCP servers. Handed the adjudication prompt it
+replied "What do you mean by Two? Need context". So there is no cloud fallback;
+adjudication needs Ollama and says so when it is missing.
+
+Latency was also misread at first. The initial run took 46 s for two pairs, which
+looked disqualifying; it was a cold model and 800-character excerpts. Warm, with
+400-character excerpts, two pairs take about 1.4 s.
 
 ## Query expansion was built, measured, and removed
 
