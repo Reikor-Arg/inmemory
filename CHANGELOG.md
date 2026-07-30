@@ -3,6 +3,17 @@
 Newest first. Every figure quoted here was measured on a real session, not
 estimated.
 
+## 2.12.1 - the plugin spoke Spanish
+
+Everything the plugin printed was in Spanish -- the injection header, the NEWER
+marker, the session labels, the stats line, every selftest message that shows up
+in a public CI log. The README was in English and the plugin was not, which for
+anyone installing it outside Argentina reads as a mistake.
+
+All of it is English now. The injection header also states the framing outright,
+since that is the moment it matters: a hit is what was said then, not what is
+true now, and a turn marked NEWER may supersede the one above it.
+
 ## 2.12.0 - the search now looks for the change of mind
 
 2.11.0 named the problem: the ranking has no recency term, so a retracted turn

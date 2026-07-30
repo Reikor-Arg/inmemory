@@ -537,8 +537,8 @@ export function renderPointers(hits, budgetTokens = BUDGET_TOKENS) {
     // hits superseded the other, and a date alone cannot separate two turns
     // twenty minutes apart. Six characters is a cheap price for that.
     const when = (h.ts || "").slice(0, 16).replace("T", " ");
-    const tag = h.newer ? " | MAS NUEVO, misma sesion" : "";
-    const line = `  #${h.id} | ${when} | sesion ${h.session.slice(0, 8)}${tag} | ${head}`;
+    const tag = h.newer ? " | NEWER, same session" : "";
+    const line = `  #${h.id} | ${when} | session ${h.session.slice(0, 8)}${tag} | ${head}`;
     if (spent + line.length > cap) break;
     out.push(line);
     spent += line.length;
@@ -552,9 +552,10 @@ function cmdInject(payload) {
                       payload.session_id || "");
   const lines = renderPointers(hits);
   if (!lines.length) return; // nothing worth paying for
-  console.log("<recall> Turnos de sesiones anteriores de este proyecto cuyos terminos " +
-    "coinciden con tu mensaje. Solo el encabezado -- para leer el texto verbatim de " +
-    `alguno, corre: node "${SELF}" show <id> [<id>...]`);
+  console.log("<recall> Turns from earlier sessions in this project whose wording " +
+    "matches this message. Headers only, and a hit is what was said then, not what " +
+    "is true now -- a turn marked NEWER came later in the same session and may " +
+    `supersede the one above it. For the verbatim text: node "${SELF}" show <id> [<id>...]`);
   console.log(lines.join("\n"));
   console.log("</recall>");
 }
@@ -946,7 +947,7 @@ function cmdShow(args) {
   for (const raw of ids) {
     const rec = readChunk(Number(raw.replace("#", "")));
     if (!rec) { console.log(`\n=== #${raw}: no existe ===`); continue; }
-    console.log(`\n=== #${rec.id} | ${rec.project} | sesion ${rec.session.slice(0, 8)} | ${(rec.ts || "").slice(0, 16)} ===\n${rec.text}`);
+    console.log(`\n=== #${rec.id} | ${rec.project} | session ${rec.session.slice(0, 8)} | ${(rec.ts || "").slice(0, 16)} ===\n${rec.text}`);
   }
 }
 
@@ -958,7 +959,7 @@ function cmdSearch(args) {
   if (!hits.length) { console.log("Sin resultados."); return; }
   for (const h of hits) {
     const body = h.text.length <= 1200 ? h.text : h.text.slice(0, 1200) + "\n[...]";
-    console.log(`\n=== #${h.id} | sesion ${h.session.slice(0, 8)} | ${(h.ts || "").slice(0, 16)} | score ${h.score.toFixed(2)} ===\n${body}`);
+    console.log(`\n=== #${h.id} | session ${h.session.slice(0, 8)} | ${(h.ts || "").slice(0, 16)} | score ${h.score.toFixed(2)} ===\n${body}`);
   }
 }
 
@@ -1795,7 +1796,7 @@ function cmdStats() {
   const meta = readJson(META, { docs: 0, files: {} });
   let bytes = 0;
   try { bytes = fs.statSync(CHUNKS).size; } catch { /* no index yet */ }
-  console.log(`chunks=${meta.docs}  archivos=${Object.keys(meta.files).length}  datos=${bytes} B  (${ROOT})`);
+  console.log(`chunks=${meta.docs}  files=${Object.keys(meta.files).length}  data=${bytes} B  (${ROOT})`);
 }
 
 // ------------------------------------------------------------------ selftest
@@ -1813,7 +1814,7 @@ async function selftest() {
     L({ type: "assistant", requestId: "r1",
         message: { content: [{ type: "text", text: "DUPLICADO POR STREAMING" }] } }),
     L({ type: "user", message: { content: [
-        { type: "tool_result", content: [{ type: "text", text: "opcion B" }] }] } }),
+        { type: "tool_result", content: [{ type: "text", text: "option B" }] }] } }),
     L({ type: "user", message: { content: [
         { type: "tool_result", content: [{ type: "text", text: "Z".repeat(9000) }] }] } }),
     L({ type: "user", isMeta: true,
@@ -1825,12 +1826,12 @@ async function selftest() {
   ].join(""));
 
   const { chunks, resume } = await readNewChunks(file, 0);
-  assert(chunks.length === 1, `la vuelta abierta no debe indexarse: ${chunks.length}`);
+  assert(chunks.length === 1, `an unfinished turn must not be indexed: ${chunks.length}`);
   const body = chunks[0].text;
   assert(body.includes("arreglar el deploy") && body.includes("kubectl rollout status"),
-    "perdio el pedido o el comando");
+    "lost the request or the command");
   assert(!body.includes("DUPLICADO POR STREAMING"), "no deduplico el streaming");
-  assert(body.includes("opcion B"), "perdio una respuesta de AskUserQuestion");
+  assert(body.includes("option B"), "lost an AskUserQuestion answer");
   assert(!body.includes("ZZZ"), "indexo un Volcado");
   assert(!body.includes("YYY"), "indexo un cuerpo de skill (isMeta)");
   assert(body.length < MAX_CHUNK_CHARS + 200, `chunk sin acotar: ${body.length}`);
@@ -1838,34 +1839,34 @@ async function selftest() {
   const again = await readNewChunks(file, resume);
   assert(again.chunks.length === 0, "reindexo lo ya emitido");
 
-  // Una sesion terminada tiene que entregar su ultimo turno, o se pierde para
-  // siempre: se retiene cada pasada por si sigue creciendo, y al terminar la
-  // sesion nada lo completa. Faltaba el turno final de CADA sesion -- 4.076
-  // chunks sobre 14.268 en un historial real.
+  // A finished session has to hand over its last turn or it is lost for good:
+  // every pass holds it back in case the turn is still growing, and once the
+  // session ends nothing ever completes it. The final turn of EVERY session was
+  // missing -- 4,076 chunks out of 14,268 in a real history.
   const done = await readNewChunks(file, 0, true);
   assert(done.chunks.length === 2,
-    `sesion terminada debe emitir 2 turnos, emitio ${done.chunks.length}`);
-  assert(done.chunks[1].text.includes("segundo pedido"), "perdio el turno final");
+    `a finished session must emit 2 turns, emitted ${done.chunks.length}`);
+  assert(done.chunks[1].text.includes("segundo pedido"), "lost the final turn");
 
   assert(splitTurn("u", ["a".repeat(5000), "b".repeat(5000)]).length === 2,
-    "no partio la vuelta larga");
-  assert(covered("el timeout de socket", ["timeout", "socket"]) === 2, "cobertura mal contada");
-  assert(covered("colored mantengo", ["color", "tengo"]) === 0, "conto substrings");
+    "did not split the long turn");
+  assert(covered("el timeout de socket", ["timeout", "socket"]) === 2, "coverage miscounted");
+  assert(covered("colored mantengo", ["color", "tengo"]) === 0, "counted substrings");
   assert(JSON.stringify(termsOf("el timeout de socket")) === JSON.stringify(["timeout", "socket"]),
-    "termsOf no filtro stopwords");
+    "termsOf did not filter stopwords");
 
   const ptrs = renderPointers(
     Array.from({ length: 40 }, (_, i) => ({ id: i, text: `titulo ${i}\n` + "x".repeat(9000),
       session: "sess", ts: "2026-01-01" })), 100);
-  assert(ptrs.length > 0, "no genero punteros");
-  assert(ptrs.join("").length <= Math.floor(100 * CHARS_PER_TOKEN), "presupuesto no respetado");
-  assert(!ptrs.some((p) => p.includes("x".repeat(50))), "el puntero arrastro el cuerpo");
+  assert(ptrs.length > 0, "produced no pointers");
+  assert(ptrs.join("").length <= Math.floor(100 * CHARS_PER_TOKEN), "budget not respected");
+  assert(!ptrs.some((p) => p.includes("x".repeat(50))), "the pointer dragged the body along");
 
   // ISO weeks decide how digests group; a wrong boundary silently files a
   // session under the wrong week and the digest quietly omits it.
   assert(isoWeek("2026-01-01T00:00:00Z") === "2026-W01", "ISO week of Jan 1 wrong: " + isoWeek("2026-01-01T00:00:00Z"));
   assert(isoWeek("2026-12-31T00:00:00Z") === "2026-W53", "ISO week of Dec 31 wrong: " + isoWeek("2026-12-31T00:00:00Z"));
-  assert(isoWeek("no es fecha") === "unknown", "fecha invalida no manejada");
+  assert(isoWeek("no es fecha") === "unknown", "invalid date not handled");
 
   // Re-read blocking denies a tool call, so every branch that decides "you
   // already have this" is checked. A false positive here hides a file the model
@@ -1877,86 +1878,86 @@ async function selftest() {
   const read = (extra = {}) =>
     rereadVerdict({ tool_name: "Read", session_id: sess, tool_input: { file_path: probe, ...extra } });
 
-  assert(read() === null, "la primera lectura no se puede bloquear");
-  assert(read() !== null, "la segunda lectura identica debia bloquearse");
-  assert(read({ offset: 10 }) === null, "una lectura parcial nunca se bloquea");
+  assert(read() === null, "a first read can never be blocked");
+  assert(read() !== null, "an identical second read must be blocked");
+  assert(read({ offset: 10 }) === null, "a partial read is never blocked");
 
   fs.writeFileSync(probe, "uno y algo mas");   // distinto tamano -> distinto contenido
-  assert(read() === null, "el archivo cambio: hay que dejar releer");
-  assert(read() !== null, "deberia volver a bloquear tras registrar el cambio");
+  assert(read() === null, "the file changed: the re-read is earned");
+  assert(read() !== null, "must block again once the change is recorded");
 
   rereadVerdict({ tool_name: "Edit", session_id: sess, tool_input: { file_path: probe } });
-  assert(read() === null, "tras editar, la relectura esta ganada");
+  assert(read() === null, "after an edit, the re-read is earned");
 
   read();
   clearReads(sess);
-  assert(read() === null, "compactar borra el registro: el archivo ya no esta en contexto");
+  assert(read() === null, "a compaction clears the record: the file left the context");
 
   assert(rereadVerdict({ tool_name: "Read", session_id: sess,
     tool_input: { file_path: path.join(os.tmpdir(), "no-existe-inmemory") } }) === null,
-    "un archivo inexistente no se juzga");
+    "a missing file is not judged");
 
   clearReads(sess);
-  try { fs.unlinkSync(probe); } catch { /* ya no esta */ }
+  try { fs.unlinkSync(probe); } catch { /* already gone */ }
 
-  // Un turno retractado puntua igual que el que lo reemplazo, asi que traer el
-  // posterior de la misma sesion es la unica senal de cual gano. Si esto se
-  // rompe, el indice devuelve decisiones muertas con cara de vigentes.
+  // A retracted turn scores exactly as well as the one that replaced it, so the
+  // later turn from the same session is the only signal of which one won. A bug
+  // here hands back a dead decision wearing the face of a live one.
   const q = [
-    { id: 1, session: "a", ts: "2026-01-01T10:00" },   // el abandonado, mejor score
-    { id: 2, session: "a", ts: "2026-01-01T10:20" },   // la retractacion
+    { id: 1, session: "a", ts: "2026-01-01T10:00" },   // the abandoned one, better score
+    { id: 2, session: "a", ts: "2026-01-01T10:20" },   // the retraction
     { id: 3, session: "b", ts: "2026-01-02T09:00" },
-    { id: 4, session: "a", ts: "2026-01-01T09:00" },   // anterior: no sirve
+    { id: 4, session: "a", ts: "2026-01-01T09:00" },   // earlier: no use
   ];
   const w = withLaterTurns(q, 1);
-  assert(w.length === 2, `esperaba el hit y su posterior, vinieron ${w.length}`);
-  assert(w[0].id === 1 && w[1].id === 2, `orden mal: ${w.map((x) => x.id).join(",")}`);
-  assert(w[1].newer === true, "el posterior no quedo marcado");
-  assert(!w[0].newer, "el primario no debe marcarse");
+  assert(w.length === 2, `expected the hit and its later turn, got ${w.length}`);
+  assert(w[0].id === 1 && w[1].id === 2, `wrong order: ${w.map((x) => x.id).join(",")}`);
+  assert(w[1].newer === true, "the later turn was not marked");
+  assert(!w[0].newer, "the primary must not be marked");
 
-  // El mas nuevo de la sesion, no el primero que aparece.
+  // The newest in the session, not the first one encountered.
   const w2 = withLaterTurns([
     { id: 1, session: "a", ts: "2026-01-01T10:00" },
     { id: 2, session: "a", ts: "2026-01-01T10:20" },
     { id: 3, session: "a", ts: "2026-01-01T11:00" },
   ], 1);
-  assert(w2.length === 2 && w2[1].id === 3, `debia traer el ultimo: ${JSON.stringify(w2.map((x) => x.id))}`);
+  assert(w2.length === 2 && w2[1].id === 3, `must return the latest: ${JSON.stringify(w2.map((x) => x.id))}`);
 
-  // Nada posterior en la misma sesion -> un solo puntero, sin invento.
+  // Nothing later in the same session -> one pointer, nothing invented.
   const w3 = withLaterTurns([{ id: 1, session: "a", ts: "2026-01-01T10:00" }], 1);
-  assert(w3.length === 1 && !w3[0].newer, "invento un posterior donde no habia");
+  assert(w3.length === 1 && !w3[0].newer, "invented a later turn where there was none");
 
-  // Ningun chunk se devuelve dos veces aunque sea el posterior de dos primarios.
+  // No chunk is returned twice, even when it is the later turn for two primaries.
   const w4 = withLaterTurns(q, 4);
   const ids = w4.map((x) => x.id);
-  assert(new Set(ids).size === ids.length, `duplico punteros: ${ids.join(",")}`);
+  assert(new Set(ids).size === ids.length, `duplicated pointers: ${ids.join(",")}`);
 
-  // Las reglas se inyectan en cada sesion: lo que se cuele aca se paga siempre.
+  // The rules ship on every session: anything that slips in here is paid for always.
   const doc = [
-    "# Titulo", "prosa que explica el archivo", "",
-    "<!--", "- opcion apagada", "-->", "",
-    "---", "", "- **Regla real.** Va al prompt.",
+    "# Title", "prose explaining the file", "",
+    "<!--", "- an option that is off", "-->", "",
+    "---", "", "- **A real rule.** This reaches the prompt.",
   ].join("\n");
   const r = rulesText(doc);
-  assert(r === "- **Regla real.** Va al prompt.", `regla mal recortada: ${JSON.stringify(r)}`);
-  assert(!r.includes("prosa"), "inyecto la documentacion del archivo");
-  assert(!r.includes("opcion apagada"), "inyecto un bloque comentado");
-  assert(rulesText("sin separador") === "sin separador", "sin marcador debe ir entero");
-  assert(rulesText("") === null, "archivo vacio no inyecta nada");
+  assert(r === "- **A real rule.** This reaches the prompt.", `rule trimmed wrong: ${JSON.stringify(r)}`);
+  assert(!r.includes("prose"), "injected the file's own documentation");
+  assert(!r.includes("an option that is off"), "injected a commented-out block");
+  assert(rulesText("sin separador") === "sin separador", "with no marker the whole file goes");
+  assert(rulesText("") === null, "an empty file injects nothing");
 
   const real = rulesText();
   assert(real && real.length < 1200,
-    `las reglas del repo pesan ${real ? real.length : 0} chars, demasiado para cada sesion`);
+    `the repo rules weigh ${real ? real.length : 0} chars, too much for every session`);
 
-  // Las dos versiones se editan a mano y se desincronizaron tres releases
-  // seguidas sin que nada avisara. `claude plugin validate` lo ve; el selftest
-  // corre siempre, y validate solo cuando alguien se acuerda.
+  // Both versions are hand-edited and drifted apart for three releases with
+  // nothing warning. `claude plugin validate` catches it; the selftest runs on
+  // every change, and validate only when someone remembers.
   const vp = path.join(HERE, "..", ".claude-plugin", "plugin.json");
   const vm = path.join(HERE, "..", ".claude-plugin", "marketplace.json");
   if (fs.existsSync(vp) && fs.existsSync(vm)) {
     const a = readJson(vp, {}).version;
     const b = ((readJson(vm, {}).plugins || [])[0] || {}).version;
-    assert(a && a === b, `plugin.json dice ${a} y marketplace.json dice ${b}`);
+    assert(a && a === b, `plugin.json says ${a}, marketplace.json says ${b}`);
   }
 
   console.log("OK: selftest passed");
@@ -1969,7 +1970,7 @@ function assert(cond, msg) { if (!cond) { throw new Error(msg); } }
 async function main() {
   const [cmd, ...args] = process.argv.slice(2);
   if (cmd === "--selftest") return selftest();
-  if (cmd === "index") return console.log(`chunks nuevos: ${await cmdIndex(process.cwd(), args.includes("--all"))}`);
+  if (cmd === "index") return console.log(`new chunks: ${await cmdIndex(process.cwd(), args.includes("--all"))}`);
   if (cmd === "hook-index") {
     const payload = await readStdin();
     return void (await cmdIndex(payload.cwd || process.cwd(), false));
