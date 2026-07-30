@@ -1026,6 +1026,31 @@ async function adjudicator() {
   return null;
 }
 
+// The turns that follow a hit inside its own session, found by position rather
+// than by matching the query.
+//
+// This is the only way the turn where you settled can ever surface. Measured on a
+// real query: the turn where the argument happened contains four of the query's
+// terms and comes back; "ok do it that way" contains none and is dropped by the
+// coverage gate before ranking even runs. It is not outranked, it is invisible --
+// and the gate is what keeps this plugin quiet rather than noisy, so loosening it
+// is not the trade to make.
+//
+// Chunk ids are assigned in reading order, so a session's chunks are contiguous:
+// measured, 2,291 of 2,298 sessions. The seven exceptions were indexed turn by
+// turn while other projects interleaved, so their ids are still ascending with
+// small gaps -- hence scanning a span of ids rather than assuming adjacency.
+export function laterInSession(fd, lens, hit, span = 40, max = 3) {
+  const out = [];
+  const end = Math.min(lens.length - 1, hit.id + span);
+  for (let id = hit.id + 1; id <= end && out.length < max; id++) {
+    const rec = readChunkAt(fd, lens[id]);
+    if (!rec || rec.session !== hit.session) continue;
+    out.push(rec);
+  }
+  return out;
+}
+
 // Bounded on purpose: each pair is a model round trip, and a
 // search nobody can wait for is a search nobody runs.
 export function supersededPairs(hits, max = 2) {
@@ -1037,6 +1062,8 @@ export function supersededPairs(hits, max = 2) {
   }
   return pairs;
 }
+
+const ADJUDICATE_HITS = env("INMEMORY_ADJUDICATE_HITS", 2);
 
 const clip = (t, n = 400) => (t.length <= n ? t : t.slice(0, n) + "\n[...]");
 
@@ -1050,10 +1077,30 @@ async function cmdSearch(args) {
   const verdicts = new Map();
   const judge = await adjudicator();
   if (judge) {
-    const pairs = supersededPairs(hits);
-    if (pairs.length) {
-      process.stderr.write(`adjudicating ${pairs.length} pair(s) with ${judge.name}...\n`);
-      for (const [older, newer] of pairs) {
+    // Two sources of candidates, and the second is the one that matters. The
+    // flagged pairs are turns that matched the query; the session neighbours are
+    // turns found by position, which is how a short "ok do it that way" -- with
+    // none of the query's words in it -- can be seen at all.
+    const jobs = [];
+    for (const [older, newer] of supersededPairs(hits)) jobs.push([older, newer]);
+
+    const fd = openChunks();
+    try {
+      const lens = readJson(OFFSETS, []);
+      for (const h of hits.slice(0, ADJUDICATE_HITS)) {
+        if (h.newer) continue;   // already covered as the later half of a pair
+        for (const cand of laterInSession(fd, lens, h)) {
+          if (!jobs.some(([a, b]) => a.id === h.id && b.id === cand.id)) jobs.push([h, cand]);
+        }
+      }
+    } finally {
+      if (fd) fs.closeSync(fd);
+    }
+
+    if (jobs.length) {
+      process.stderr.write(`adjudicating ${jobs.length} pair(s) with ${judge.name}...\n`);
+      for (const [older, newer] of jobs) {
+        if (verdicts.has(older.id)) continue;   // first verdict wins; stop asking
         let out = null;
         try {
           out = await judge.ask(ADJUDICATE_PROMPT +

@@ -92,13 +92,20 @@ term matching can tell the two apart. A model can. That is allowed by the
 invariants -- verbatim on write, summarising on read -- so it exists as
 `INMEMORY_ADJUDICATE=1`, on `/recall` only, never on the automatic injection.
 
-**It adds judgement, not reach, and the first version of this document claimed
-otherwise.** The adjudicator only ever sees pairs `withLaterTurns` already flagged,
-and those are turns that passed the query's coverage gate. A retraction phrased
-without any of the query's words never enters the candidate list, so it never
-reaches the model. Extending reach would mean pulling a hit's neighbouring turns by
-session position rather than by term overlap and judging those -- more model calls,
-and not built.
+The first version only judged pairs `withLaterTurns` had flagged, which meant it
+added judgement without adding reach: those are turns that already passed the
+coverage gate, so a retraction phrased without any of the query's words never
+reached the model at all. `laterInSession` fixes that by pulling a hit's following
+turns **by position in the session**, term overlap ignored. That is the only way the
+turn where you settled can surface — "ok, do it that way" holds none of your query's
+words, so the gate drops it before ranking runs. It is not outranked, it is
+invisible, and the gate is also what keeps the plugin quiet, so loosening it is not
+the trade.
+
+That needed no new index. Chunk ids are assigned in reading order, so a session's
+chunks are contiguous: measured, 2,291 of 2,298. The seven exceptions were indexed
+turn by turn with other projects interleaving, leaving ascending ids with small
+gaps, which is why a span of ids is scanned rather than adjacency assumed.
 
 Two things about it were wrong on the first attempt and both were caught by
 running it rather than reading it:
@@ -117,6 +124,26 @@ not an API call, it is a whole Claude Code agent carrying its own system prompt,
 the project's CLAUDE.md and its MCP servers. Handed the adjudication prompt it
 replied "What do you mean by Two? Need context". So there is no cloud fallback;
 adjudication needs Ollama and says so when it is missing.
+
+**And then it was measured properly, on 16 hand-built pairs with eight hard
+negatives -- same-topic turns that reversed nothing:**
+
+| Local model | Correct | False SUPERSEDED | Missed |
+|---|---|---|---|
+| qwen2.5:14b | 13/16 | 1 | 2 |
+| llama3.1:8b | 10/16 | 2 | 4 |
+
+The earlier 7/7 was seven easy cases and it flattered the model. One false positive
+in eight negatives is why this ships off by default: a missed retraction costs
+nothing and is honest, while a false SUPERSEDED says a live decision is dead, which
+is the most damaging thing a tool built on "if it came back, it was said" can
+claim. Both turns are still printed either way, so a wrong label misleads rather
+than hides -- without that, this would not ship at all.
+
+The follow-up that would change the verdict is not a bigger local model but a
+better question: the current prompt asks about a decision changing, and several of
+the false positives were turns that changed an *implementation detail* of the same
+decision. That distinction was never put to the model.
 
 Latency was also misread at first. The initial run took 46 s for two pairs, which
 looked disqualifying; it was a cold model and 800-character excerpts. Warm, with

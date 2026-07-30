@@ -3,26 +3,35 @@
 Newest first. Every figure quoted here was measured on a real session, not
 estimated.
 
-## 2.13.0 - a local model can judge what superseded what
+## 2.14.0 - the turn where you settled is invisible, and now reachable
 
-withLaterTurns only finds a retraction that shares the query words. A model finds
-it regardless: it sees "no, scrap that" with no vocabulary in common. With
-INMEMORY_ADJUDICATE=1 and Ollama running, /recall asks the local model whether the
-later turn actually reversed the earlier one and marks it SUPERSEDED.
+BM25 cannot find the turn that ended an argument. Measured against a real query,
+the turn where the argument happened holds four of its terms and comes back; "ok,
+do it that way" holds none, and the coverage gate drops it before ranking runs. It
+is not outranked — it is invisible, and the gate is also what keeps this plugin
+quiet, so loosening it is not the trade.
 
-Only on /recall, never on the automatic injection -- the injection has to cost
-nothing you did not ask for. Only pairs the ranking already flagged, capped at
-two: about 1.4 s on a warm 8B model.
+So `laterInSession` pulls a hit's following turns **by position in the session**,
+term overlap ignored, and the opt-in adjudicator judges those. No new index was
+needed: chunk ids are assigned in reading order, so a session's chunks are
+contiguous — 2,291 of 2,298 sessions, measured.
 
-Two things were wrong on the first attempt, both caught by running it:
+**Then it was measured properly, and the verdict is still off by default.** 16
+hand-built pairs, eight of them same-topic turns that reversed nothing:
 
-- Asked to answer "SUPERSEDES or UNRELATED", llama3.1:8b answered SUPERSEDES for
-  everything, unrelated pairs included, and reversing the options changed nothing.
-  A classifier that always says yes marks live decisions dead. As a plain yes/no
-  question the same model scored 7/7, four of them same-topic non-retractions.
-- There is no Haiku fallback.  is not an API call, it is a whole Claude
-  Code agent; handed the prompt it replied "What do you mean by Two?". A direct
-  API call needs a key most people never set. So this needs Ollama and says so.
+| Local model | Correct | False `SUPERSEDED` |
+|---|---|---|
+| qwen2.5:14b | 13/16 | 1 |
+| llama3.1:8b | 10/16 | 2 |
+
+The 7/7 quoted below was seven easy cases and it flattered the model. A missed
+retraction costs nothing; a false `SUPERSEDED` says a live decision is dead, which
+is the worst claim a tool built on "if it came back, it was said" can make. Both
+turns are printed either way, so a wrong label misleads rather than hides —
+without that this would not ship at all. Use the 14B if you turn it on.
+
+Also corrected: 2.13.0 said the adjudicator caught retractions phrased without any
+of the query's words. It could not, until this release.
 
 ## 2.13.0 - a local model can judge what superseded what
 

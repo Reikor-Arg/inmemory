@@ -100,9 +100,25 @@ the earlier one, and marks it `SUPERSEDED` only when it did. Off by default; nee
 Ollama, with no cloud fallback; about 1.4 s on a warm 8B model, and never on the
 automatic injection.
 
-**That adds judgement, not reach.** It only ever sees pairs the lexical layer
-already surfaced, so it does nothing for a retraction that shares no words with
-your query, or one made in a different session. Those remain invisible.
+It also pulls a hit's following turns **by position in the session** rather than by
+term overlap, which is the only way the turn where you settled can surface at all:
+"ok, do it that way" contains none of your query's words and the coverage gate drops
+it before ranking runs. It is not outranked, it is invisible.
+
+**It ships off, and here is why.** Measured on 16 hand-built pairs, half of them
+same-topic turns that reversed nothing:
+
+| Local model | Correct | False `SUPERSEDED` |
+|---|---|---|
+| qwen2.5:14b | 13/16 | **1** |
+| llama3.1:8b | 10/16 | **2** |
+
+A missed retraction costs nothing. A false `SUPERSEDED` tells you a live decision is
+dead, which is the worst thing this plugin can say — so one in eight is not a
+default. Both turns are still printed, so the label misleads rather than hides, and
+that is the only reason it exists at all. Use the 14B if you turn it on.
+
+It still does nothing for a retraction made in a *different* session.
 
 So, with everything on: treat a hit as *something that was said then*, never as
 *what is true now*.
