@@ -24,6 +24,34 @@ Two things were wrong on the first attempt, both caught by running it:
   Code agent; handed the prompt it replied "What do you mean by Two?". A direct
   API call needs a key most people never set. So this needs Ollama and says so.
 
+## 2.13.0 - a local model can judge what superseded what
+
+`withLaterTurns` only finds a retraction that reuses the query's words. A model
+finds it regardless: it sees "no, scrap that" with no vocabulary in common. With
+`INMEMORY_ADJUDICATE=1` and Ollama running, `/recall` asks the local model whether
+the later turn actually reversed the earlier one and marks it `SUPERSEDED`.
+
+Only on `/recall`, never on the automatic injection — that has to cost nothing you
+did not ask for. Only pairs the ranking already flagged, capped at two: about
+1.4 s on a warm 8B model.
+
+Two things were wrong on the first attempt, both caught by running it rather than
+reading it:
+
+- Asked to answer "SUPERSEDES or UNRELATED", llama3.1:8b answered SUPERSEDES for
+  everything, unrelated pairs included, and reversing the two options changed
+  nothing. A classifier that always says yes marks live decisions dead. Asked the
+  same thing as a plain yes/no question it scored 7/7, four of those same-topic
+  turns that reversed nothing.
+- There is no Haiku fallback. `claude -p` is not an API call, it is a whole Claude
+  Code agent carrying its own system prompt and this project's CLAUDE.md; handed
+  the prompt it replied "What do you mean by Two? Need context". A direct API call
+  needs a key most people running Claude Code never set. So this needs Ollama and
+  says so when it is missing.
+
+Latency was misread at first too: the first run took 46 s for two pairs, which
+looked disqualifying. That was a cold model and 800-character excerpts.
+
 ## 2.12.1 - the plugin spoke Spanish
 
 Everything the plugin printed was in Spanish -- the injection header, the NEWER
