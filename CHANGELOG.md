@@ -3,6 +3,27 @@
 Newest first. Every figure quoted here was measured on a real session, not
 estimated.
 
+## 2.15.0 - decisions were the one thing a query could not reach
+
+`DECISIONS.md` is the most reliable content in the whole system: conclusions a
+person wrote down on purpose, dated, append-only, in the repo. It was shown at
+session start and filterable through `/decide`, and it was **not in the search
+path at all** -- so the one thing you could trust most was the one thing you could
+not look up.
+
+Recorded decisions are now returned ahead of every turn, by `/recall` and by the
+automatic injection. Same coverage gate as any turn, so an unrelated decision
+cannot ride to the top of every search. One file read, no model, and nothing in it
+can be hallucinated: if a decision comes back, somebody typed it.
+
+This also sidesteps the whole retraction problem rather than mitigating it. A
+decision file has no ranking to fool and no timestamps to weigh, because the newest
+entry is simply last, and superseding one means adding an entry that says so.
+
+Nothing writes to it but you. No model judges what counted as a decision: a wrongly
+recorded one would persist in a repo and be replayed as fact, which is the one place
+a model is never allowed near.
+
 ## 2.14.0 - the turn where you settled is invisible, and now reachable
 
 BM25 cannot find the turn that ended an argument. Measured against a real query,

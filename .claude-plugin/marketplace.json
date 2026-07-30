@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "inmemory",
-      "version": "2.14.0",
+      "version": "2.15.0",
       "description": "Gives Claude Code back the exact words from past sessions instead of a summary of them. When the context is compacted, hands back the thread that was just summarised away. Declines a re-read of a file that has not changed, and an oversized skill load. Automatic throughout, and silent when it has nothing worth saying. No dependencies, no API calls, nothing leaves your machine.",
       "source": "./",
       "category": "Productivity"

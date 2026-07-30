@@ -471,7 +471,30 @@ export function search(prompt, project, excludeSession, limit = MAX_HITS,
   } finally {
     if (fd) fs.closeSync(fd);
   }
-  return withLaterTurns(qualifying, limit);
+  // Decisions first, and above every turn. A recorded decision is a human's
+  // conclusion, written on purpose, at the moment it was reached -- which is
+  // exactly what a hit is supposed to tell you and what a transcript turn can only
+  // hint at. They were readable at session start and filterable through `decide`,
+  // but they were not in the search path at all, so the highest-value thing in the
+  // whole system was the one thing a query could not reach.
+  return [...decisionHits(terms, need), ...withLaterTurns(qualifying, limit)];
+}
+
+// DECISIONS.md lives in the repo, is written by hand, and is small -- so this is
+// one file read and no model. Nothing here can be hallucinated: if a decision
+// comes back, somebody typed it.
+export function decisionHits(terms, need, file = decisionsFile()) {
+  let body;
+  try { body = fs.readFileSync(file, "utf8"); } catch { return []; }
+  const out = [];
+  for (const entry of body.split(/^## /m).slice(1)) {
+    const text = "## " + entry.trimEnd();
+    if (covered(text, terms) < need) continue;
+    const when = (text.match(/\d{4}-\d{2}-\d{2}/) || [""])[0];
+    out.push({ decision: true, id: null, session: "", ts: when, text, score: 0 });
+  }
+  // Newest last in the file, and the newest decision is the one that holds.
+  return out.reverse().slice(0, 2);
 }
 
 // A transcript is full of things that were true for twenty minutes, and the
@@ -537,8 +560,12 @@ export function renderPointers(hits, budgetTokens = BUDGET_TOKENS) {
     // hits superseded the other, and a date alone cannot separate two turns
     // twenty minutes apart. Six characters is a cheap price for that.
     const when = (h.ts || "").slice(0, 16).replace("T", " ");
-    const tag = h.newer ? " | NEWER, same session" : "";
-    const line = `  #${h.id} | ${when} | session ${h.session.slice(0, 8)}${tag} | ${head}`;
+    // A decision has no chunk id to expand -- it is already the whole thing, in
+    // DECISIONS.md, where it can be read in full and argued with in a diff.
+    const line = h.decision
+      ? `  DECISION | ${when} | ${head}`
+      : `  #${h.id} | ${when} | session ${h.session.slice(0, 8)}` +
+        `${h.newer ? " | NEWER, same session" : ""} | ${head}`;
     if (spent + line.length > cap) break;
     out.push(line);
     spent += line.length;
@@ -552,10 +579,11 @@ function cmdInject(payload) {
                       payload.session_id || "");
   const lines = renderPointers(hits);
   if (!lines.length) return; // nothing worth paying for
-  console.log("<recall> Turns from earlier sessions in this project whose wording " +
-    "matches this message. Headers only, and a hit is what was said then, not what " +
-    "is true now -- a turn marked NEWER came later in the same session and may " +
-    `supersede the one above it. For the verbatim text: node "${SELF}" show <id> [<id>...]`);
+  console.log("<recall> Recorded decisions and earlier turns from this project whose " +
+    "wording matches this message. A DECISION line is a conclusion someone wrote down " +
+    "on purpose and outranks any turn; read it in full in DECISIONS.md. A turn is what " +
+    "was said then, not what is true now -- one marked NEWER came later in the same " +
+    `session and may supersede the one above it. Verbatim text: node "${SELF}" show <id>`);
   console.log(lines.join("\n"));
   console.log("</recall>");
 }
@@ -2102,6 +2130,28 @@ async function selftest() {
   const w4 = withLaterTurns(q, 4);
   const ids = w4.map((x) => x.id);
   assert(new Set(ids).size === ids.length, `duplicated pointers: ${ids.join(",")}`);
+
+  // A recorded decision outranks every turn, so the gate on it has to be the same
+  // gate: matching on one stray word would put an unrelated decision at the top of
+  // every search.
+  const decFile = path.join(os.tmpdir(), `inmemory-decisions-${process.pid}.md`);
+  fs.writeFileSync(decFile, [
+    "# Decisions", "",
+    "## 2026-01-01 - chose postgres over sqlite",
+    "two services write concurrently", "",
+    "## 2026-02-02 - the gate is term coverage",
+    "a bm25 score threshold does not separate signal from noise", "",
+  ].join("\n"));
+  const dh = (q) => decisionHits(termsOf(q), 2, decFile);
+  assert(dh("term coverage gate").length === 1, "did not find the matching decision");
+  assert(dh("term coverage gate")[0].decision === true, "decision not flagged as one");
+  assert(dh("term coverage gate")[0].text.includes("signal from noise"), "returned a truncated decision");
+  assert(dh("postgres concurrently").length === 1, "missed the other decision");
+  assert(dh("kubernetes helm").length === 0, "an unrelated query matched a decision");
+  assert(dh("postgres").length === 0, "one term was enough to match a decision");
+  assert(decisionHits(termsOf("anything"), 2, decFile + ".missing").length === 0,
+    "a missing DECISIONS.md must be silent");
+  try { fs.unlinkSync(decFile); } catch { /* already gone */ }
 
   // Only a pair the ranking itself flagged gets sent to a model. Widen this and
   // an explicit search turns into a dozen round trips nobody asked for.

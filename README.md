@@ -31,7 +31,7 @@ You never invoke anything.
 | The context is compacted | your own turns from this session, in order | ~700 tok |
 | You open a project | where you left off | ~110 tok |
 | Every session start | routing rules: what belongs on a cheaper model | ~255 tok |
-| You type a prompt | pointers into past turns sharing uncommon words with it | ~200 tok |
+| You type a prompt | matching recorded decisions, then pointers into past turns | ~200 tok |
 | A file is opened | earlier turns that discussed that file | ~150 tok |
 | A file is re-read, unchanged | the read is declined — that copy is still in context | saves it |
 | An oversized skill is invoked | declined, with a pointer to the file worth reading | saves it |
@@ -130,11 +130,11 @@ so the first week of a fresh install is quieter than the fourth.
 
 | Command | What it gives you |
 |---|---|
-| `/recall <query>` | verbatim excerpts (`--global` across all projects) |
+| `/recall <query>` | recorded decisions, then verbatim excerpts (`--global` for all projects) |
 | `/timeline` · `/digest` | sessions by week; what was asked in one, verbatim |
 | `/topics` · `/map` · `/duplicates` | what this project is about; its layout; repeated names |
 | `/standup` | uncommitted work, branches, distance from default |
-| `/decide <what and why>` | append a decision to `DECISIONS.md` in the repo |
+| `/decide <what and why>` | append a decision to `DECISIONS.md`, searched ahead of every turn |
 | `/doctor` · `/lint` · `/reindex` | check the install; audit prompts; backfill history |
 | `/how-it-works` | what it does, what it costs, what it cannot do |
 
@@ -142,6 +142,27 @@ None of them run a model. They are not free to *have*, though:
 `claude plugin details inmemory` reports **~607 tokens always-on** — every
 command and skill leaves its description in the prompt. Hooks cost nothing; they
 run outside the model.
+
+## Decisions outrank turns
+
+A turn tells you what was said at a moment. A decision tells you what was concluded,
+written on purpose, by a person. `/decide "chose Postgres over SQLite because two
+services write concurrently"` appends it to `DECISIONS.md` in the repo — dated,
+append-only, in a diff where a team can argue with it rather than in a private index.
+
+Those entries are now searched **ahead of every turn**, and they were not before:
+they were shown at session start and filterable through `/decide`, but a query could
+not reach them, which made the most reliable thing in the system the one thing you
+could not look up. They pass the same coverage gate as any turn, so an unrelated
+decision cannot ride to the top of every search.
+
+Superseding one means adding an entry that says so, never editing the old one. That
+also sidesteps everything above about retraction: a decision file has no ranking to
+fool and no timestamps to compare, because the newest entry is simply last.
+
+**Nothing writes to it but you.** No model decides what counted as a decision — a
+wrongly recorded one would persist in the repo and be replayed as fact, and that is
+the one place a model is never allowed near.
 
 ## Config
 
