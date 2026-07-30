@@ -93,22 +93,19 @@ That is deliberately not recency weighting. Weighting needs a constant nobody ca
 guess, and too much of it breaks finding something from three weeks ago, which is
 half the value here. This adds context instead of second-guessing the score.
 
-That still cannot catch a retraction phrased without any of the query's words. For
-that there is one opt-in: with `INMEMORY_ADJUDICATE=1` and Ollama running,
-`/recall` asks the local model whether the later turn actually reversed the
-earlier one, and marks it `SUPERSEDED` when it did. A model sees "no, scrap that"
-with no vocabulary in common at all.
+A later turn on the same subject is not the same thing as a retraction, though, and
+lexical matching cannot tell them apart. So with `INMEMORY_ADJUDICATE=1` and Ollama
+running, `/recall` asks the local model whether that later turn actually reversed
+the earlier one, and marks it `SUPERSEDED` only when it did. Off by default; needs
+Ollama, with no cloud fallback; about 1.4 s on a warm 8B model, and never on the
+automatic injection.
 
-It needs Ollama and there is no cloud fallback. `claude -p` looks like a cheap way
-to ask Haiku but it is a whole Claude Code agent, and handed a classification
-prompt it asks what you mean; a real API call needs a key most people never set.
+**That adds judgement, not reach.** It only ever sees pairs the lexical layer
+already surfaced, so it does nothing for a retraction that shares no words with
+your query, or one made in a different session. Those remain invisible.
 
-Only on `/recall`, never on the automatic injection: the point of the injection is
-that it costs nothing you did not ask for. And only for pairs the ranking already
-flagged, capped at two — about 1.4 s on a warm 8B model.
-
-Even with it on: treat a hit as *something that was said then*, never as *what is
-true now*.
+So, with everything on: treat a hit as *something that was said then*, never as
+*what is true now*.
 
 It also only knows what was written down, and an empty index has nothing to say,
 so the first week of a fresh install is quieter than the fourth.

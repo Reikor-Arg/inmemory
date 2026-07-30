@@ -87,10 +87,18 @@ said then*, never as *what is true now*.
 
 ### Asking a model, and the two ways that failed
 
-For a retraction that shares no words with the query, only a model can tell. That
-is allowed by the invariants -- verbatim on write, summarising on read -- so it
-exists as `INMEMORY_ADJUDICATE=1`, on `/recall` only, never on the automatic
-injection.
+A later turn on the same subject is not necessarily a retraction, and no amount of
+term matching can tell the two apart. A model can. That is allowed by the
+invariants -- verbatim on write, summarising on read -- so it exists as
+`INMEMORY_ADJUDICATE=1`, on `/recall` only, never on the automatic injection.
+
+**It adds judgement, not reach, and the first version of this document claimed
+otherwise.** The adjudicator only ever sees pairs `withLaterTurns` already flagged,
+and those are turns that passed the query's coverage gate. A retraction phrased
+without any of the query's words never enters the candidate list, so it never
+reaches the model. Extending reach would mean pulling a hit's neighbouring turns by
+session position rather than by term overlap and judging those -- more model calls,
+and not built.
 
 Two things about it were wrong on the first attempt and both were caught by
 running it rather than reading it:
