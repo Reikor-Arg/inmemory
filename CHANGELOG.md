@@ -3,6 +3,19 @@
 Newest first. Every figure quoted here was measured on a real session, not
 estimated.
 
+## 2.15.1 - teach the chaining loop
+
+The skill taught `search` then `show` and never the loop between them: read the
+pointers, re-search with the vocabulary the session actually used, pull neighbours
+of a mid-thread hit by adjacent id. Chaining through the index is the cheap version
+of chaining greps over the transcripts -- each hop costs ranked pointers, not raw
+log dumps, because ranking and dedup happen outside the context window.
+
+The loop is deliberately not automated. Mechanical re-search with terms taken from
+the results was built, measured and removed (query expansion): without judgement
+between hops, the first hop's noise becomes the second hop's query. The model is
+the judgement; the skill now says so.
+
 ## 2.15.0 - decisions were the one thing a query could not reach
 
 `DECISIONS.md` is the most reliable content in the whole system: conclusions a

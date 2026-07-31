@@ -52,6 +52,28 @@ If the search returns nothing, say so. Do not fill the gap with a plausible
 reconstruction — a fabricated memory is worse than an admitted blank, because
 the user cannot tell the difference.
 
+## Chain searches — you are the judgement between hops
+
+One search is rarely the whole answer. Chain them, with you deciding each hop:
+
+1. `search <your best terms>` — read the pointers, ~200 tokens.
+2. Wrong vocabulary? The pointers show the words that were *actually used* —
+   yours may not match the session's. Re-search with those. `topics` also
+   hands you the project's own vocabulary for exactly this.
+3. `show <id>` — only for the pointers that turned out to matter.
+4. A hit mid-thread? `show` its neighbours (`show 4102 4103 4104`) — ids are
+   assigned in reading order, so adjacent ids are usually adjacent turns.
+
+Each hop costs pointers, not raw log dumps: chaining through the index is the
+cheap version of chaining greps over the transcript files, because ranking and
+dedup happen outside the context window.
+
+Do not automate the loop blindly. Mechanical re-search with terms from the
+results was built into this plugin once, measured, and removed — without
+judgement between hops, the first hop's noise becomes the second hop's query.
+The judgement is your contribution; make each next query a decision, not a
+reflex.
+
 ## Recording decisions
 
 When a real alternative is rejected, or the obvious choice is deliberately not
